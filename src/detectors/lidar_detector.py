@@ -38,7 +38,6 @@ class LidarDetector(BaseDetector):
 
     def filter_roi_frustum(self, points: np.ndarray, calib, img_shape: tuple) -> np.ndarray:
         """
-        Modifica/Valutazione personalizzata:
         Filtra i punti LiDAR mantenendo unicamente quelli che ricadono nel campo visivo (FOV)
         della fotocamera e all'interno del range di profondità desiderato [0, max_distance].
         """
@@ -46,19 +45,23 @@ class LidarDetector(BaseDetector):
             return points
 
         # 1. Proietta i punti nel frame fotocamera e sui pixel 2D
+        # pts_2d e depth contengono solo i punti con z > 0 (valid_mask == True)
         pts_2d, depth, valid_mask = calib.velo2img(points)
         
         h, w = img_shape[:2]
         
-        # 2. Maschera ROI: Punti visibili nei limiti dell'immagine 2D e con profondità valida
-        in_fov = (
-            valid_mask &
+        # 2. Maschera per i punti proiettati che cadono nei limiti dell'immagine 2D e del range
+        in_img_bounds = (
             (depth > 0.1) & (depth < self.max_distance) &
             (pts_2d[:, 0] >= 0) & (pts_2d[:, 0] < w) &
             (pts_2d[:, 1] >= 0) & (pts_2d[:, 1] < h)
         )
         
-        return points[in_fov]
+        # 3. Ricostruisci la maschera booleana della dimensione originale di 'points'
+        final_mask = np.zeros(len(points), dtype=bool)
+        final_mask[valid_mask] = in_img_bounds
+        
+        return points[final_mask]
 
     def _preprocess(self, points: np.ndarray) -> dict:
         """
