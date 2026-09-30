@@ -1,0 +1,20 @@
+# Dati dataset
+data/
+*.bin
+*.png
+*.jpg
+
+# Bytecode e Cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints/
+
+# Ambienti Virtuali e VSCode
+.venv/
+venv/
+ENV/
+.vscode/
