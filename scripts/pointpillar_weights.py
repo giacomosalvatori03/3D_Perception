@@ -5,7 +5,7 @@ WEIGHTS_DIR = "weights"
 WEIGHTS_FILE = os.path.join(WEIGHTS_DIR, "pointpillar_kitti.pth")
 
 # URL ufficiale e diretto dal CDN OpenMMLab per PointPillars (KITTI 3D Car/3Class)
-WEIGHTS_URL = "https://download.openmmlab.com/mmdetection3d/v0.1.0_models/pointpillars/hv_pointpillars_secfpn_6x8_160e_kitti-3d-car/hv_pointpillars_secfpn_6x8_160e_kitti-3d-car_20200620_230614-70e1b7d7.pth"
+WEIGHTS_URL = "https://download.openmmlab.com/mmdetection3d/v1.0.0_models/pointpillars/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class_20220301_150306-37dc2420.pth"
 
 def download_pointpillars_weights():
     """Scarica i pesi pre-addestrati di PointPillars dal CDN di OpenMMLab."""
