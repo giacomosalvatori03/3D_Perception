@@ -1,5 +1,8 @@
-# Dati dataset
+# Dati pesanti e Pesi dei modelli
 data/
+weights/
+*.pth
+*.onnx
 *.bin
 *.png
 *.jpg
