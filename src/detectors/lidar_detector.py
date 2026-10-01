@@ -1,7 +1,10 @@
+import os
+import torch
 import numpy as np
 from typing import List
 from src.detectors.base_detector import BaseDetector
 from src.detection import Detection3D
+from scripts.download_weights import download_pointpillars_weights
 
 class LidarDetector(BaseDetector):
     """
@@ -20,20 +23,35 @@ class LidarDetector(BaseDetector):
         self.max_distance = max_distance
         self.model_path = model_path
         
-        # Inizializzazione del modello (es. PointPillars)
-        self.model = self._load_model(model_path)
+        # Selezione automatica del device (GPU CUDA se disponibile, altrimenti CPU)
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = torch.device(device)
+            
+        print(f"⚙️ LidarDetector inizializzato su device: {self.device}")
+
+        # Caricamento automatico dei pesi e inizializzazione modello
+        self.checkpoint = self._load_model(model_path)
 
     def _load_model(self, model_path: str):
         """
-        Carica i pesi della rete neurale PointPillars.
-        (Predisposto per il modello pre-addestrato o pesi PyTorch).
+        Scarica (se necessario) e carica il checkpoint del modello PointPillars.
         """
-        if model_path is not None:
-            print(f"📦 Caricamento modello PointPillars da: {model_path}")
-            # Qui inseriremo il load dei pesi PyTorch / OpenPCDet
+        if model_path is None:
+            model_path = download_pointpillars_weights()
+
+        if model_path is None or not os.path.exists(model_path):
+            print("⚠️ Impossibile reperire i pesi del modello. LidarDetector sara in modalita mock.")
             return None
-        else:
-            print("⚠️ Nessun peso specificato per LidarDetector: in modalità placeholder/mock.")
+
+        print(f"📦 Caricamento checkpoint PyTorch da: {model_path}")
+        try:
+            checkpoint = torch.load(model_path, map_location=self.device)
+            print("✅ Checkpoint PointPillars caricato con successo in memoria!")
+            return checkpoint
+        except Exception as e:
+            print(f"❌ Errore durante il caricamento del checkpoint: {e}")
             return None
 
     def filter_roi_frustum(self, points: np.ndarray, calib, img_shape: tuple) -> np.ndarray:
