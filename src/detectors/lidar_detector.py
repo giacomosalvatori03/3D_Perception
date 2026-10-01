@@ -4,7 +4,7 @@ import numpy as np
 from typing import List
 from src.detectors.base_detector import BaseDetector
 from src.detection import Detection3D
-from scripts.download_weights import download_pointpillars_weights
+from scripts.pointpillar_weights import download_pointpillars_weights
 
 class LidarDetector(BaseDetector):
     """
