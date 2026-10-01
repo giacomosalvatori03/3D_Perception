@@ -16,7 +16,8 @@ class LidarDetector(BaseDetector):
         model_path: str = None,
         conf_threshold: float = 0.3,
         apply_roi_filter: bool = True,
-        max_distance: float = 70.0
+        max_distance: float = 70.0,
+        device: str = None
     ):
         super().__init__(conf_threshold=conf_threshold)
         self.apply_roi_filter = apply_roi_filter
