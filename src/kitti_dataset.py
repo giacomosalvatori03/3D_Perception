@@ -24,7 +24,7 @@ class KittiDataset():
             for f in os.listdir(self.image_dir) 
             if f.endswith('.png')
         ])
-        print(f"📦 KittiDataset caricato da '{data_root}' ({self.velo_dir}): {len(self.sample_ids)} campioni trovati.")
+        # print(f"📦 KittiDataset caricato da '{data_root}' ({self.velo_dir}): {len(self.sample_ids)} campioni trovati.")
 
     def __len__(self):
         return len(self.sample_ids)
