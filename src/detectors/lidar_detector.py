@@ -1,5 +1,6 @@
 import os
 import torch
+import torchvision
 import numpy as np
 from typing import List
 from .base_detector import BaseDetector
