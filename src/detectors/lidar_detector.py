@@ -22,9 +22,8 @@ class LidarDetector(BaseDetector):
         super().__init__(conf_threshold=conf_threshold)
         self.apply_roi_filter = apply_roi_filter
         self.max_distance = max_distance
-        self.model_path = model_path
         
-        # Selezione automatica del device (GPU CUDA se disponibile, altrimenti CPU)
+        # 1. Selezione automatica del device (GPU CUDA / CPU)
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
@@ -32,8 +31,12 @@ class LidarDetector(BaseDetector):
             
         print(f"⚙️ LidarDetector inizializzato su device: {self.device}")
 
-        # Caricamento automatico dei pesi e inizializzazione modello
+        # 2. Inizializzazione della Pillarization (Pre-Processing)
+        self.pillarizer = Pillarizer()
+
+        # 3. Caricamento del Checkpoint/Modello
         self.checkpoint = self._load_model(model_path)
+        self.model = self.checkpoint  # Assegna il modello caricato a self.model
 
     def _load_model(self, model_path: str):
         """
@@ -84,10 +87,17 @@ class LidarDetector(BaseDetector):
 
     def _preprocess(self, points: np.ndarray) -> dict:
         """
-        Prepara la point cloud nel formato atteso da PointPillars (es. Voxelization / Pillarization).
+        Converte la nuvola di punti LiDAR filtrata nei tensori di pilastri (Pillar Features & Coords).
         """
-        # Formato di input standard LiDAR KITTI: (N, 4) -> [x, y, z, intensity]
-        return {"pts": points}
+        features, coords = self.pillarizer.process(points)
+        
+        if features is None:
+            return None
+
+        return {
+            'pillar_features': features.to(self.device),
+            'pillar_coords': coords.to(self.device)
+        }
 
     def _postprocess(self, raw_outputs, calib) -> List[Detection3D]:
         """
@@ -119,12 +129,11 @@ class LidarDetector(BaseDetector):
         # 2. Pre-processing
         inputs = self._preprocess(points)
 
-        # 3. Forward Pass (Infeerensa con PointPillars)
-        if self.model is not None:
-            # raw_outputs = self.model(inputs)
-            raw_outputs = None
-        else:
-            raw_outputs = None
+        # 3. Forward Pass
+        raw_outputs = None
+        if self.model is not None and inputs is not None:
+            # Qui inseriremo l'esecuzione del forward pass
+            pass
 
         # 4. Post-processing & Costruzione Detection3D
         detections = self._postprocess(raw_outputs, calib)
