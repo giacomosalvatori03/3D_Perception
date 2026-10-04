@@ -16,12 +16,10 @@ class LidarDetector(BaseDetector):
         self,
         model_path: str = None,
         conf_threshold: float = 0.3,
-        apply_roi_filter: bool = True,
         max_distance: float = 70.0,
         device: str = None
     ):
         super().__init__(conf_threshold=conf_threshold)
-        self.apply_roi_filter = apply_roi_filter
         self.max_distance = max_distance
         
         # 1. Selezione automatica del device (GPU CUDA / CPU)
@@ -59,32 +57,32 @@ class LidarDetector(BaseDetector):
             print(f"❌ Errore durante il caricamento del checkpoint: {e}")
             return None
 
-    def filter_roi_frustum(self, points: np.ndarray, calib, img_shape: tuple) -> np.ndarray:
-        """
-        Filtra i punti LiDAR mantenendo unicamente quelli che ricadono nel campo visivo (FOV)
-        della fotocamera e all'interno del range di profondità desiderato [0, max_distance].
-        """
-        if points.shape[0] == 0:
-            return points
+    # def filter_roi_frustum(self, points: np.ndarray, calib, img_shape: tuple) -> np.ndarray:
+    #     """
+    #     Filtra i punti LiDAR mantenendo unicamente quelli che ricadono nel campo visivo (FOV)
+    #     della fotocamera e all'interno del range di profondità desiderato [0, max_distance].
+    #     """
+    #     if points.shape[0] == 0:
+    #         return points
 
-        # 1. Proietta i punti nel frame fotocamera e sui pixel 2D
-        # pts_2d e depth contengono solo i punti con z > 0 (valid_mask == True)
-        pts_2d, depth, valid_mask = calib.velo2img(points)
+    #     # 1. Proietta i punti nel frame fotocamera e sui pixel 2D
+    #     # pts_2d e depth contengono solo i punti con z > 0 (valid_mask == True)
+    #     pts_2d, depth, valid_mask = calib.velo2img(points)
         
-        h, w = img_shape[:2]
+    #     h, w = img_shape[:2]
         
-        # 2. Maschera per i punti proiettati che cadono nei limiti dell'immagine 2D e del range
-        in_img_bounds = (
-            (depth > 0.1) & (depth < self.max_distance) &
-            (pts_2d[:, 0] >= 0) & (pts_2d[:, 0] < w) &
-            (pts_2d[:, 1] >= 0) & (pts_2d[:, 1] < h)
-        )
+    #     # 2. Maschera per i punti proiettati che cadono nei limiti dell'immagine 2D e del range
+    #     in_img_bounds = (
+    #         (depth > 0.1) & (depth < self.max_distance) &
+    #         (pts_2d[:, 0] >= 0) & (pts_2d[:, 0] < w) &
+    #         (pts_2d[:, 1] >= 0) & (pts_2d[:, 1] < h)
+    #     )
         
-        # 3. Ricostruisci la maschera booleana della dimensione originale di 'points'
-        final_mask = np.zeros(len(points), dtype=bool)
-        final_mask[valid_mask] = in_img_bounds
+    #     # 3. Ricostruisci la maschera booleana della dimensione originale di 'points'
+    #     final_mask = np.zeros(len(points), dtype=bool)
+    #     final_mask[valid_mask] = in_img_bounds
         
-        return points[final_mask]
+    #     return points[final_mask]
 
     def _preprocess(self, points: np.ndarray) -> dict:
         """
@@ -121,22 +119,19 @@ class LidarDetector(BaseDetector):
         """
         points = sample['points']
         calib = sample['calib']
-        img_shape = sample['image'].shape
 
-        # 1. Pre-filtraggio ROI Frustum (se abilitato)
-        if self.apply_roi_filter:
-            points = self.filter_roi_frustum(points, calib, img_shape)
-
-        # 2. Pre-processing
+        # 1. Pre-processing (Pillarization)
         inputs = self._preprocess(points)
+        if inputs is None:
+            return []
 
-        # 3. Forward Pass
+        # 2. Forward Pass
         raw_outputs = None
         if self.model is not None and inputs is not None:
             # Qui inseriremo l'esecuzione del forward pass
             pass
 
-        # 4. Post-processing & Costruzione Detection3D
+        # 3. Post-processing & Costruzione Detection3D
         detections = self._postprocess(raw_outputs, calib)
 
         return detections
