@@ -1,6 +1,7 @@
 import os
 import cv2
 import numpy as np
+from typing import Dict, List
 from src.calibration import Calibration
 
 class KittiDataset():
@@ -29,7 +30,7 @@ class KittiDataset():
     def __len__(self):
         return len(self.sample_ids)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx)-> Dict:
         sample_id = self.sample_ids[idx]
 
         # 1. Carica Immagine RGB
@@ -50,11 +51,11 @@ class KittiDataset():
         objects = self._parse_label(label_path)
 
         sample = {
-            'id': sample_id,
+            'sample_id': sample_id,
             'image': image,           # np.ndarray (H, W, 3) uint8
             'points': points,         # np.ndarray (N, 4) float32 [x, y, z, intensity]
             'calib': calib,           # Istanza di Calibration
-            'objects': objects        # Lista di dizionari Ground Truth
+            'labels': objects        # Lista di dizionari Ground Truth
         }
 
         if self.transform:
