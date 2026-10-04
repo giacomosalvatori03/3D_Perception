@@ -167,16 +167,15 @@ class LidarDetector(BaseDetector):
             pt_lidar = box_lid[:3].reshape(1, 3)
             pt_cam = calib.velo2cam(pt_lidar)[0]
 
-            # Formato Detection3D: box_3d = [x, y, z, h, w, l, r_y] nel frame fotocamera
-            box_3d_cam = [
-                pt_cam[0], pt_cam[1], pt_cam[2],
-                box_lid[3], box_lid[4], box_lid[5],
-                box_lid[6]
-            ]
-
+            # Parametri per Detection3D:
+            # - dimensions_3d: [h, w, l] -> box_lid[3:6]
+            # - location_3d: [x, y, z] -> pt_cam
+            # - rotation_y: yaw -> box_lid[6]
             det = Detection3D(
-                label=cls_name,
-                box_3d=box_3d_cam,
+                obj_type=cls_name,
+                dimensions_3d=box_lid[3:6],
+                location_3d=pt_cam,
+                rotation_y=float(box_lid[6]),
                 score=score
             )
             detections.append(det)
