@@ -199,6 +199,6 @@ class LidarDetector(BaseDetector):
             cls_preds, box_preds = self.net(inputs['pillar_features'], inputs['pillar_coords'])
 
         # 3. Post-processing & Costruzione Detection3D
-        detections = self._postprocess((cls_preds, box_preds), calib)
+        detections = self._postprocess(cls_preds, box_preds, calib)
 
         return detections
