@@ -114,7 +114,7 @@ class Visualizer:
         image = sample['image'].copy()
         calib = sample['calib']
         points = sample['points']
-        gt_objects = sample['objects']
+        gt_objects = sample['labels']
 
         # 1. Proiezione su Immagine RGB (GT = Verde, Pred = Rosso)
         if draw_gt and gt_objects:
@@ -147,7 +147,7 @@ class Visualizer:
 
         # Subplot 1: Immagine RGB
         axes[0].imshow(image)
-        axes[0].set_title(f"3D Bounding Boxes proiettate su Immagine - Frame {sample['id']}")
+        axes[0].set_title(f"3D Bounding Boxes proiettate su Immagine - Frame {sample['sample_id']}")
         axes[0].axis('off')
 
         # Subplot 2: Bird's Eye View (BEV)
