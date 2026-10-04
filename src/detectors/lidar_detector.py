@@ -2,10 +2,10 @@ import os
 import torch
 import numpy as np
 from typing import List
-from src.detectors.base_detector import BaseDetector
+from .base_detector import BaseDetector
+from .pillarization import Pillarizer
+from .pointpillars_net import PointPillarsNet
 from src.detection import Detection3D
-from src.detectors.pillarization import Pillarizer
-from src.detection import PointPillarsNet
 from scripts.pointpillar_weights import download_pointpillars_weights
 
 CLASS_NAMES = ['Car', 'Pedestrian', 'Cyclist']
