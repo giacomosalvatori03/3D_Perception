@@ -7,7 +7,7 @@ from typing import List
 from .base_detector import BaseDetector
 from .pillarization import Pillarizer
 from .pointpillars_net import PointPillarsNet
-from src.detection import Detection3D
+from ..detection import Detection3D
 from scripts import download_pointpillars_weights
 
 CLASS_NAMES = ['Car', 'Pedestrian', 'Cyclist']
