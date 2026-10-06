@@ -134,15 +134,15 @@ class LidarDetector(BaseDetector):
             pt_lidar = box_lidar[:3].reshape(1, 3)
             pt_cam = calib.velo2cam(pt_lidar)[0]
 
-            # 2. Conversione corretta delle dimensioni: [Altezza (dz), Larghezza (dx), Lunghezza (dy)]
-            dimensions_3d = [float(box_lidar[5]), float(box_lidar[3]), float(box_lidar[4])]
+            # 2. Dimensioni: [Altezza (dz), Lunghezza (dy), Larghezza (dx)]
+            dimensions_3d = [float(box_lidar[5]), float(box_lidar[4]), float(box_lidar[3])]
 
             # 3. Conversione dell'angolo Yaw (LiDAR) -> rotation_y (KITTI Camera)
             yaw = float(box_lidar[6])
             rotation_y = -yaw - np.pi / 2.0
-            # Normalizzazione nell'intervallo [-pi, pi]
             rotation_y = (rotation_y + np.pi) % (2 * np.pi) - np.pi
 
+        
             det = Detection3D(
                 obj_type=cls_name,
                 dimensions_3d=dimensions_3d,
