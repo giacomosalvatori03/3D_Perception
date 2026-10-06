@@ -62,7 +62,7 @@ class LidarDetector(BaseDetector):
         if need_download:
             print("⬇️ Download file di configurazione e pesi ufficiali con OpenMIM...")
             try:
-                download(package='mmdet3d', configs=['pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class'], dest='weights')
+                download(package='mmdet3d', configs=['pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class'], where='weights')
                 
                 pth_files = glob.glob('weights/*.pth')
                 if pth_files and not os.path.exists(self.checkpoint_path):
