@@ -1,12 +1,10 @@
 import os
-import glob
 import torch
 import numpy as np
 from typing import List
 
 from mmdet3d.apis import init_model, inference_detector
 from mmdet3d.utils import register_all_modules
-from mim.commands import download
 
 from .base_detector import BaseDetector
 from ..detection import Detection3D
@@ -55,27 +53,26 @@ class LidarDetector(BaseDetector):
         return 'weights/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class.py'
 
     def _ensure_weights_and_config(self):
-        """Scarica e gestisce la presenza sia del file .py che dei pesi .pth."""
+        """Scarica sia i pesi .pth che il file .py tramite URL ufficiali diretti."""
         os.makedirs('weights', exist_ok=True)
         
-        need_download = not os.path.exists(self.checkpoint_path) or not os.path.exists(self.config_path)
-        if need_download:
-            print("⬇️ Download file di configurazione e pesi ufficiali con OpenMIM...")
+        # 1. Download pesi ufficiali PointPillars
+        if not os.path.exists(self.checkpoint_path):
+            print("⬇️ Download pesi ufficiali PointPillars da OpenMMLab...")
+            official_weights_url = "https://download.openmmlab.com/mmdetection3d/v1.0.0_models/pointpillars/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class_20220301_150306-37bd24ab.pth"
             try:
-                download(package='mmdet3d', configs=['pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class'], where='weights')
-                
-                pth_files = glob.glob('weights/*.pth')
-                if pth_files and not os.path.exists(self.checkpoint_path):
-                    os.rename(pth_files[0], self.checkpoint_path)
-
-                py_files = glob.glob('weights/*.py')
-                if py_files and not os.path.exists(self.config_path):
-                    self.config_path = py_files[0]
+                torch.hub.download_url_to_file(official_weights_url, self.checkpoint_path)
             except Exception as e:
-                print(f"⚠️ Download tramite MIM non riuscito: {e}. Uso fallback GitHub...")
-                if not os.path.exists(self.checkpoint_path):
-                    fallback_url = "https://github.com/giacomosalvatori03/3D_Perception/releases/download/v1.0.0/pointpillar_kitti.pth"
-                    torch.hub.download_url_to_file(fallback_url, self.checkpoint_path)
+                print(f"❌ Impossibile scaricare i pesi del modello: {e}")
+
+        # 2. Download file di configurazione
+        if not os.path.exists(self.config_path):
+            print("⬇️ Download file di configurazione PointPillars da GitHub...")
+            official_config_url = "https://raw.githubusercontent.com/open-mmlab/mmdetection3d/dev-1.x/configs/pointpillars/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class.py"
+            try:
+                torch.hub.download_url_to_file(official_config_url, self.config_path)
+            except Exception as e:
+                print(f"❌ Impossibile scaricare la configurazione: {e}")
 
     def detect(self, sample: dict) -> List[Detection3D]:
         """Esegue l'inferenza e converte le predizioni in oggetti Detection3D."""
