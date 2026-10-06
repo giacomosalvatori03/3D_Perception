@@ -1,4 +1,6 @@
 import os
+import glob
+import subprocess
 import torch
 import numpy as np
 from typing import List
@@ -53,26 +55,46 @@ class LidarDetector(BaseDetector):
         return 'weights/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class.py'
 
     def _ensure_weights_and_config(self):
-        """Scarica sia i pesi .pth che il file .py tramite URL ufficiali diretti."""
+        """Garantisce la presenza sia del file .py di configurazione che dei pesi .pth."""
         os.makedirs('weights', exist_ok=True)
         
-        # 1. Download pesi ufficiali PointPillars
-        if not os.path.exists(self.checkpoint_path):
-            print("⬇️ Download pesi ufficiali PointPillars da OpenMMLab...")
-            official_weights_url = "https://download.openmmlab.com/mmdetection3d/v1.0.0_models/pointpillars/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class_20220301_150306-37bd24ab.pth"
+        # 1. Tenta il download usando il comando CLI di OpenMIM
+        if not os.path.exists(self.checkpoint_path) or not os.path.exists(self.config_path):
+            print("⬇️ Download file di configurazione e pesi ufficiali con OpenMIM...")
             try:
-                torch.hub.download_url_to_file(official_weights_url, self.checkpoint_path)
+                subprocess.run([
+                    "mim", "download", "mmdet3d",
+                    "--config", "pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class",
+                    "--dest", "weights"
+                ], check=True)
             except Exception as e:
-                print(f"❌ Impossibile scaricare i pesi del modello: {e}")
+                print(f"⚠️ MIM CLI non riuscito ({e}), proseguo con download URL diretto...")
 
-        # 2. Download file di configurazione
+        # 2. Se i pesi non sono stati rinominati, assegna il file .pth scaricato o usa l'URL ufficiale v1.x
+        if not os.path.exists(self.checkpoint_path):
+            pth_files = glob.glob('weights/*.pth')
+            if pth_files:
+                os.rename(pth_files[0], self.checkpoint_path)
+            else:
+                print("⬇️ Download pesi ufficiali PointPillars da URL OpenMMLab v1.x...")
+                official_weights_url = "https://download.openmmlab.com/mmdetection3d/v1.0.0_models/pointpillars/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class_20220301_150306-37dc2420.pth"
+                try:
+                    torch.hub.download_url_to_file(official_weights_url, self.checkpoint_path)
+                except Exception as e:
+                    print(f"❌ Impossibile scaricare i pesi del modello: {e}")
+
+        # 3. Se il config non è presente nei percorsi standard, scaricalo da GitHub
         if not os.path.exists(self.config_path):
-            print("⬇️ Download file di configurazione PointPillars da GitHub...")
-            official_config_url = "https://raw.githubusercontent.com/open-mmlab/mmdetection3d/dev-1.x/configs/pointpillars/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class.py"
-            try:
-                torch.hub.download_url_to_file(official_config_url, self.config_path)
-            except Exception as e:
-                print(f"❌ Impossibile scaricare la configurazione: {e}")
+            py_files = glob.glob('weights/*.py')
+            if py_files:
+                self.config_path = py_files[0]
+            else:
+                print("⬇️ Download file di configurazione PointPillars da GitHub...")
+                official_config_url = "https://raw.githubusercontent.com/open-mmlab/mmdetection3d/dev-1.x/configs/pointpillars/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class.py"
+                try:
+                    torch.hub.download_url_to_file(official_config_url, self.config_path)
+                except Exception as e:
+                    print(f"❌ Impossibile scaricare la configurazione: {e}")
 
     def detect(self, sample: dict) -> List[Detection3D]:
         """Esegue l'inferenza e converte le predizioni in oggetti Detection3D."""
