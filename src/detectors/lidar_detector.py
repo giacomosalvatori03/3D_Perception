@@ -1,3 +1,4 @@
+import glob
 import os
 import torch
 import numpy as np
@@ -5,6 +6,7 @@ from typing import List
 
 from mmdet3d.apis import init_model, inference_detector
 from mmdet3d.utils import register_all_modules
+from mim.commands import download
 
 from .base_detector import BaseDetector
 from ..detection import Detection3D
@@ -40,12 +42,29 @@ class LidarDetector(BaseDetector):
         print("✅ Modello mmdet3d caricato con successo!")
 
     def _download_weights_if_missing(self):
-        """Scarica i pesi ufficiali se non presenti nella cartella weights/."""
+        """Scarica i pesi ufficiali PointPillars tramite OpenMIM se non presenti."""
         if not os.path.exists(self.checkpoint_path):
-            os.makedirs(os.path.dirname(self.checkpoint_path), exist_ok=True)
-            url = "https://download.openmmlab.com/mmdetection3d/v1.0.0_models/pointpillars/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class_20220301_150306-37bd24ab.pth"
-            print(f"⬇️ Scaricamento pesi ufficiali PointPillars da OpenMMLab...")
-            torch.hub.download_url_to_file(url, self.checkpoint_path)
+            os.makedirs('weights', exist_ok=True)
+            print("⬇️ Scaricamento pesi ufficiali PointPillars con OpenMIM...")
+            try:
+                download(package='mmdet3d', configs=['pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class'], dest='weights')
+                # Rinomina il file scaricato in weights/pointpillar_kitti.pth
+                downloaded_files = glob.glob('weights/*.pth')
+                if downloaded_files:
+                    os.rename(downloaded_files[0], self.checkpoint_path)
+            except Exception as e:
+                print(f"⚠️ Download tramite MIM fallito: {e}. Tento il download di fallback...")
+                # fallback_url = "https://github.com/giacomosalvatori03/3D_Perception/releases/download/v1.0.0/pointpillar_kitti.pth"
+                #torch.hub.download_url_to_file(fallback_url, self.checkpoint_path)
+
+    # def _download_weights_if_missing(self):
+    #     """Scarica i pesi ufficiali se non presenti nella cartella weights/."""
+    #     if not os.path.exists(self.checkpoint_path):
+    #         os.makedirs(os.path.dirname(self.checkpoint_path), exist_ok=True)
+    #         url = "https://download.openmmlab.com/mmdetection3d/v1.0.0_models/pointpillars/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class_20220301_150306-37bd24ab.pth"
+    #         print(f"⬇️ Scaricamento pesi ufficiali PointPillars da OpenMMLab...")
+    #         torch.hub.download_url_to_file(url, self.checkpoint_path)
+    #         #https://download.openmmlab.com/mmdetection3d/v1.0.0_models/pointpillars/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class_20220301_150306-37dc2420.pth
 
     def detect(self, sample: dict) -> List[Detection3D]:
         """
