@@ -64,7 +64,6 @@ def main():
 
     dataset = KittiDataset(
         data_root=args.data_path,
-        pts_dir='velodyne_reduced',
         subsample_mode=args.subsample_mode,
         subsample_ratio=args.subsample_ratio,
         num_beams=args.num_beams,
