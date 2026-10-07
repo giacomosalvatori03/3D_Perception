@@ -1,130 +1,53 @@
-import os
-import glob
-import subprocess
 import torch
 import numpy as np
-from typing import List
-
+from mmdet3d.structures import Box3DMode, CameraInstance3DBoxes
+from .base_detector import BaseDetector, Detection3D
 from mmdet3d.apis import init_model, inference_detector
-from mmdet3d.utils import register_all_modules
-
-from .base_detector import BaseDetector
-from ..detection import Detection3D
 
 class LidarDetector(BaseDetector):
-    """
-    Adapter per 3D Object Detection basato sulla libreria mmdet3d.
-    Carica la configurazione e i pesi ufficiali OpenMMLab per PointPillars (KITTI 3-class).
-    """
-    def __init__(
-        self,
-        config_path: str = None,
-        checkpoint_path: str = None,
-        conf_threshold: float = 0.3,
-        device: str = None
-    ):
-        super().__init__(conf_threshold=conf_threshold)
+    def __init__(self, config_path=None, checkpoint_path=None, conf_threshold=0.3, device=None):
+        super().__init__()
         
-        # Inizializza i moduli interni di OpenMMLab
-        register_all_modules(init_default_scope=True)
-        
-        # Gestione corretta dell'indicizzazione GPU/CPU
+        # Forza l'uso della GPU se disponibile
         if device is None:
             self.device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
         elif device == 'cuda':
             self.device = 'cuda:0'
         else:
             self.device = device
-        print(f"⚙️ LidarDetector (mmdet3d) inizializzato su: {self.device}")
 
+        self.conf_threshold = conf_threshold
+        self.config_path = config_path or 'configs/pointpillars_kitti.py'
         self.checkpoint_path = checkpoint_path or 'weights/pointpillar_kitti.pth'
-        self.config_path = self._resolve_config_path(config_path)
 
-        self._ensure_weights_and_config()
-        
-        print("📦 Caricamento modello mmdet3d...")
         self.model = init_model(self.config_path, self.checkpoint_path, device=self.device)
-        print("✅ Modello mmdet3d caricato con successo!")
 
-    def _resolve_config_path(self, custom_path: str) -> str:
-        if custom_path and os.path.exists(custom_path):
-            return custom_path
-
-        candidates = [
-            '/content/mmdetection3d/configs/pointpillars/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class.py',
-            'weights/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class.py',
-            'mmdetection3d/configs/pointpillars/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class.py'
-        ]
-        for c in candidates:
-            if os.path.exists(c):
-                return c
-        return 'weights/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class.py'
-
-    def _ensure_weights_and_config(self):
-        """Garantisce la presenza sia del file .py di configurazione che dei pesi .pth."""
-        os.makedirs('weights', exist_ok=True)
-        
-        # 1. Tenta il download usando il comando CLI di OpenMIM
-        if not os.path.exists(self.checkpoint_path) or not os.path.exists(self.config_path):
-            print("⬇️ Download file di configurazione e pesi ufficiali con OpenMIM...")
-            try:
-                subprocess.run([
-                    "mim", "download", "mmdet3d",
-                    "--config", "pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class",
-                    "--dest", "weights"
-                ], check=True)
-            except Exception as e:
-                print(f"⚠️ MIM CLI non riuscito ({e}), proseguo con download URL diretto...")
-
-        # 2. Se i pesi non sono stati rinominati, assegna il file .pth scaricato o usa l'URL ufficiale v1.x
-        if not os.path.exists(self.checkpoint_path):
-            pth_files = glob.glob('weights/*.pth')
-            if pth_files:
-                os.rename(pth_files[0], self.checkpoint_path)
-            else:
-                print("⬇️ Download pesi ufficiali PointPillars da URL OpenMMLab v1.x...")
-                official_weights_url = "https://download.openmmlab.com/mmdetection3d/v1.0.0_models/pointpillars/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class_20220301_150306-37dc2420.pth"
-                try:
-                    torch.hub.download_url_to_file(official_weights_url, self.checkpoint_path)
-                except Exception as e:
-                    print(f"❌ Impossibile scaricare i pesi del modello: {e}")
-
-        # 3. Se il config non è presente nei percorsi standard, scaricalo da GitHub
-        if not os.path.exists(self.config_path):
-            py_files = glob.glob('weights/*.py')
-            if py_files:
-                self.config_path = py_files[0]
-            else:
-                print("⬇️ Download file di configurazione PointPillars da GitHub...")
-                official_config_url = "https://raw.githubusercontent.com/open-mmlab/mmdetection3d/dev-1.x/configs/pointpillars/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class.py"
-                try:
-                    torch.hub.download_url_to_file(official_config_url, self.config_path)
-                except Exception as e:
-                    print(f"❌ Impossibile scaricare la configurazione: {e}")
-
-    def detect(self, sample: dict) -> List[Detection3D]:
-        """Esegue l'inferenza e converte le predizioni in oggetti Detection3D."""
-        points = sample['points']
+    def detect(self, sample):
+        pts_path = sample['pts_path']
         calib = sample['calib']
-        
-        temp_bin_path = '/tmp/temp_points.bin'
-        points.astype(np.float32).tofile(temp_bin_path)
 
-        with torch.no_grad():
-            result = inference_detector(self.model, temp_bin_path)
-            if isinstance(result, tuple):
-                result = result[0]
-
-        if os.path.exists(temp_bin_path):
-            os.remove(temp_bin_path)
-
+        # Inferenza GPU su PointPillars
+        result, _ = inference_detector(self.model, pts_path)
         pred_instances = result.pred_instances_3d
+
         scores = pred_instances.scores_3d.cpu().numpy()
         labels = pred_instances.labels_3d.cpu().numpy()
-        bboxes_3d = pred_instances.bboxes_3d.tensor.cpu().numpy()
+        bboxes_3d = pred_instances.bboxes_3d  # Oggetto LiDARInstance3DBoxes
 
         class_names = ['Car', 'Pedestrian', 'Cyclist']
         detections = []
+
+        if len(scores) == 0:
+            return detections
+
+        # Conversione Nativa mmdet3d: LiDAR -> Camera Frame
+        rect = calib.rect
+        Trv2c = calib.Tr_v2c
+        rt_mat = Trv2c @ rect.T
+        
+        # Converte tutti i box in CameraInstance3DBoxes mantenendo le convenzioni KITTI
+        bboxes_cam = bboxes_3d.convert_to(Box3DMode.CAM, rt_mat)
+        cam_tensor = bboxes_cam.tensor.cpu().numpy()
 
         for i in range(len(scores)):
             score = float(scores[i])
@@ -134,31 +57,17 @@ class LidarDetector(BaseDetector):
             cls_id = int(labels[i])
             cls_name = class_names[cls_id] if cls_id < len(class_names) else 'Unknown'
 
-            box_lidar = bboxes_3d[i]  # [x, y, z, dx, dy, dz, yaw]
-            
-            box_lidar = bboxes_3d[i]  # [x, y, z, dx, dy, dz, yaw]
-            
-            # 1. Posizione del centro (LiDAR -> Camera Rectified)
-            pt_lidar = box_lidar[:3].reshape(1, 3)
-            pt_cam = calib.velo2cam(pt_lidar)[0]
-
-            h = float(box_lidar[5])  # dz = Altezza
-            w = float(box_lidar[4])  # dy = Larghezza (Width)
-            l = float(box_lidar[3])  # dx = Lunghezza (Length)
-
-            # 2. Traslazione da Centro di Gravità 3D a Bottom-Center (KITTI Standard)
-            location_3d_bottom = [float(pt_cam[0]), float(pt_cam[1] + h / 2.0), float(pt_cam[2])]
-
-            # 3. Conversione dell'angolo Yaw (LiDAR) -> rotation_y (KITTI Camera)
-            yaw = float(box_lidar[6])
-            rotation_y = -yaw - np.pi / 2.0
-            rotation_y = (rotation_y + np.pi) % (2 * np.pi) - np.pi
+            # Struttura Camera Box KITTI: [x, y, z, l, h, w, ry]
+            box_cam = cam_tensor[i]
+            loc = [float(box_cam[0]), float(box_cam[1]), float(box_cam[2])]
+            dims = [float(box_cam[4]), float(box_cam[5]), float(box_cam[3])] # [h, w, l]
+            ry = float(box_cam[6])
 
             det = Detection3D(
                 obj_type=cls_name,
-                dimensions_3d=[h, w, l], # [Altezza, Larghezza, Lunghezza]
-                location_3d=location_3d_bottom,
-                rotation_y=rotation_y,
+                dimensions_3d=dims,
+                location_3d=loc,
+                rotation_y=ry,
                 score=score
             )
             detections.append(det)
