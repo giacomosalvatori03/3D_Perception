@@ -1,11 +1,10 @@
-import os
 import argparse
 import json
+import os
 import numpy as np
-from tqdm import tqdm
 import torch
-
 from src import KittiDataset, LidarDetector
+from tqdm import tqdm
 
 
 def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
@@ -14,21 +13,29 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
     x, y, z = location
     ry = rotation_y
 
-    x_corners = [l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2]
-    y_corners = [0, 0, 0, 0, -h, -h, -h, -h]
-    z_corners = [w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2, w / 2]
+    # CORRETTO: In Camera Frame l'asse X corrisponde alla larghezza (w) e Z alla lunghezza (l)
+    x_corners = [w / 2, w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2]
+    y_corners = [0, 0, 0, 0, -h, -h, -h, -h]  # y è la base inferiore
+    z_corners = [l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2, l / 2]
 
-    R = np.array([
-        [np.cos(ry), 0, np.sin(ry)],
-        [0, 1, 0],
-        [-np.sin(ry), 0, np.cos(ry)]
-    ], dtype=np.float32)
+    R = np.array(
+        [
+            [np.cos(ry), 0, np.sin(ry)],
+            [0, 1, 0],
+            [-np.sin(ry), 0, np.cos(ry)],
+        ],
+        dtype=np.float32,
+    )
 
     corners_3d = np.vstack([x_corners, y_corners, z_corners])
     corners_3d = np.dot(R, corners_3d)
     corners_3d[0, :] += x
     corners_3d[1, :] += y
     corners_3d[2, :] += z
+
+    # Filtro di sicurezza per oggetti dietro o troppo vicini alla fotocamera
+    if np.any(corners_3d[2, :] <= 0.1):
+        return [10.0, 10.0, 100.0, 100.0]
 
     try:
         pts_2d = calib.rect2img(corners_3d.T)
@@ -45,9 +52,10 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
 
 
 def format_kitti_line(det, bbox_2d):
-    """
-    Formatta la predizione nel formato riga 15-valori KITTI standard:
-    type truncated occluded alpha bbox_2d(4) dimensions(3) location(3) rotation_y score
+    """Formatta la predizione nel formato riga 15-valori KITTI standard:
+
+    type truncated occluded alpha bbox_2d(4) dimensions(3) location(3)
+    rotation_y score
     """
     loc_x, loc_y, loc_z = det.location_3d
     h, w, l = det.dimensions_3d
@@ -70,10 +78,10 @@ def format_kitti_line(det, bbox_2d):
 
 def format_gt_line(obj):
     """Formatta un oggetto Ground Truth nel formato KITTI standard."""
-    loc_x, loc_y, loc_z = obj['location_3d']
-    h, w, l = obj['dimensions_3d']
-    xmin, ymin, xmax, ymax = obj['bbox_2d']
-    
+    loc_x, loc_y, loc_z = obj["location_3d"]
+    h, w, l = obj["dimensions_3d"]
+    xmin, ymin, xmax, ymax = obj["bbox_2d"]
+
     return (
         f"{obj['type']} {obj['truncation']:.2f} {int(obj['occlusion'])} {obj['alpha']:.2f} "
         f"{xmin:.2f} {ymin:.2f} {xmax:.2f} {ymax:.2f} "
@@ -84,10 +92,25 @@ def format_gt_line(obj):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Infezenza LiDAR e Salvataggio Predizioni KITTI")
-    parser.add_argument("--data_path", type=str, default="/content/drive/MyDrive/3D_Perception/data/kitti_validation")
-    parser.add_argument("--save_dir", type=str, default="/content/drive/MyDrive/3D_Perception/experiments")
-    parser.add_argument("--subsample_mode", type=str, default="none", choices=["none", "random", "beam", "distance"])
+    parser = argparse.ArgumentParser(
+        description="Inferenza LiDAR e Salvataggio Predizioni KITTI"
+    )
+    parser.add_argument(
+        "--data_path",
+        type=str,
+        default="/content/drive/MyDrive/3D_Perception/data/kitti_validation",
+    )
+    parser.add_argument(
+        "--save_dir",
+        type=str,
+        default="/content/drive/MyDrive/3D_Perception/experiments",
+    )
+    parser.add_argument(
+        "--subsample_mode",
+        type=str,
+        default="none",
+        choices=["none", "random", "beam", "distance"],
+    )
     parser.add_argument("--subsample_ratio", type=float, default=1.0)
     parser.add_argument("--num_beams", type=int, default=32)
     parser.add_argument("--max_distance", type=float, default=35.0)
@@ -100,11 +123,11 @@ def main():
     args = parse_args()
 
     # Tag dell'esperimento
-    if args.subsample_mode == 'random':
+    if args.subsample_mode == "random":
         tag = f"random_{int(args.subsample_ratio * 100)}perc"
-    elif args.subsample_mode == 'beam':
+    elif args.subsample_mode == "beam":
         tag = f"beam_{args.num_beams}rings"
-    elif args.subsample_mode == 'distance':
+    elif args.subsample_mode == "distance":
         tag = f"dist_{int(args.max_distance)}m"
     else:
         tag = "baseline_100perc"
@@ -121,25 +144,32 @@ def main():
         subsample_mode=args.subsample_mode,
         subsample_ratio=args.subsample_ratio,
         num_beams=args.num_beams,
-        max_distance=args.max_distance
+        max_distance=args.max_distance,
     )
     detector = LidarDetector(conf_threshold=args.conf_thresh)
 
-    total_samples = len(dataset) if args.max_samples <= 0 else min(args.max_samples, len(dataset))
-    print(f"\n📊 Avvio Inferenza PointPillars [{tag.upper()}] | Campioni: {total_samples}/{len(dataset)}")
+    total_samples = (
+        len(dataset)
+        if args.max_samples <= 0
+        else min(args.max_samples, len(dataset))
+    )
+    print(
+        f"\n📊 Avvio Inferenza PointPillars [{tag.upper()}] | Campioni: {total_samples}/{len(dataset)}"
+    )
     print(f"💾 Destinazione file .txt su Drive: {exp_dir}")
 
     for i in tqdm(range(total_samples), desc="Elaborazione Frame"):
         sample = dataset[i]
-        calib = sample['calib']
-        
-        # Recupera l'ID del frame (es. '000008')
-        sample_id = getattr(dataset, 'sample_ids', [f"{idx:06d}" for idx in range(len(dataset))])[i]
-        if isinstance(sample_id, int):
-            sample_id = f"{sample_id:06d}"
+        calib = sample["calib"]
+
+        # Recupero ID del frame con formattazione a 6 cifre
+        if hasattr(dataset, "sample_ids") and i < len(dataset.sample_ids):
+            sample_id = str(dataset.sample_ids[i]).zfill(6)
+        else:
+            sample_id = f"{i:06d}"
 
         # 1. Salva Ground Truth .txt
-        gt_objs = sample['gt_boxes']
+        gt_objs = sample["gt_boxes"]
         gt_txt_path = os.path.join(gt_dir, f"{sample_id}.txt")
         with open(gt_txt_path, "w") as f_gt:
             for obj in gt_objs:
@@ -148,10 +178,12 @@ def main():
         # 2. Inferenza PointPillars ed esportazione Predizioni .txt
         detections = detector.detect(sample)
         pred_txt_path = os.path.join(pred_dir, f"{sample_id}.txt")
-        
+
         with open(pred_txt_path, "w") as f_pred:
             for det in detections:
-                bbox_2d = project_3d_to_2d_bbox(det.location_3d, det.dimensions_3d, det.rotation_y, calib)
+                bbox_2d = project_3d_to_2d_bbox(
+                    det.location_3d, det.dimensions_3d, det.rotation_y, calib
+                )
                 f_pred.write(format_kitti_line(det, bbox_2d))
 
     print(f"\n✅ Inferenza e salvataggio completati con successo!")
