@@ -61,7 +61,7 @@ class LidarDetector(BaseDetector):
         self.model = init_model(self.config_path, self.checkpoint_path, device=self.device)
 
     def detect(self, sample):
-        pts_path = sample['pts_path']
+        pts_path = sample['points']
         calib = sample['calib']
 
         # Inferenza
