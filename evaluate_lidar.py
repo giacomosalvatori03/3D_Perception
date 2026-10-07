@@ -56,7 +56,7 @@ def main():
         # Ground Truth
         gt_objs = sample['gt_boxes']
         gt_ann = {
-            'name': np.array([obj.obj_type for obj in gt_objs]),
+            'name': np.array([obj.type for obj in gt_objs]),
             'truncated': np.zeros(len(gt_objs)),
             'occluded': np.zeros(len(gt_objs)),
             'alpha': np.zeros(len(gt_objs)),
@@ -70,7 +70,7 @@ def main():
         # Predizioni
         detections = detector.detect(sample)
         pred_ann = {
-            'name': np.array([det.obj_type for det in detections]),
+            'name': np.array([det.type for det in detections]),
             'truncated': np.zeros(len(detections)),
             'occluded': np.zeros(len(detections)),
             'alpha': np.zeros(len(detections)),
