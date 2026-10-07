@@ -51,7 +51,7 @@ class KittiDataset(Dataset):
 
         # 3. Carica Calibration e Ground Truth
         calib = Calibration(os.path.join(self.calib_path, f"{sample_id}.txt"))
-        gt_boxes = self._load_labels(os.path.join(self.label_path, f"{sample_id}.txt"))
+        gt_boxes = self._parse_label(os.path.join(self.label_path, f"{sample_id}.txt"))
         
         img_path = os.path.join(self.image_path, f"{sample_id}.png")
 
