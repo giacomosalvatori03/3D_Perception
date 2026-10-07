@@ -23,7 +23,7 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
         [np.cos(ry), 0, np.sin(ry)],
         [0, 1, 0],
         [-np.sin(ry), 0, np.cos(ry)]
-    ])
+    ], dtype=np.float32)
 
     corners_3d = np.vstack([x_corners, y_corners, z_corners])
     corners_3d = np.dot(R, corners_3d)
@@ -64,6 +64,7 @@ def main():
 
     dataset = KittiDataset(
         data_root=args.data_path,
+        pts_dir='velodyne_reduced',
         subsample_mode=args.subsample_mode,
         subsample_ratio=args.subsample_ratio,
         num_beams=args.num_beams,
@@ -90,17 +91,17 @@ def main():
         sample = dataset[i]
         calib = sample['calib']
 
-        # Ground Truth
+        # Ground Truth (con formattazione rigida float32 / int32 per C++)
         gt_objs = sample['gt_boxes']
         gt_ann = {
             'name': np.array([obj['type'] for obj in gt_objs]),
-            'truncated': np.array([obj['truncation'] for obj in gt_objs]) if gt_objs else np.zeros(0),
-            'occluded': np.array([obj['occlusion'] for obj in gt_objs]) if gt_objs else np.zeros(0),
-            'alpha': np.array([obj['alpha'] for obj in gt_objs]) if gt_objs else np.zeros(0),
-            'bbox': np.array([obj['bbox_2d'] for obj in gt_objs]) if gt_objs else np.zeros((0, 4)),
-            'dimensions': np.array([obj['dimensions_3d'] for obj in gt_objs]) if gt_objs else np.zeros((0, 3)),
-            'location': np.array([obj['location_3d'] for obj in gt_objs]) if gt_objs else np.zeros((0, 3)),
-            'rotation_y': np.array([obj['rotation_y'] for obj in gt_objs]) if gt_objs else np.zeros(0)
+            'truncated': np.ascontiguousarray([obj['truncation'] for obj in gt_objs], dtype=np.float32) if gt_objs else np.zeros(0, dtype=np.float32),
+            'occluded': np.ascontiguousarray([obj['occlusion'] for obj in gt_objs], dtype=np.int32) if gt_objs else np.zeros(0, dtype=np.int32),
+            'alpha': np.ascontiguousarray([obj['alpha'] for obj in gt_objs], dtype=np.float32) if gt_objs else np.zeros(0, dtype=np.float32),
+            'bbox': np.ascontiguousarray([obj['bbox_2d'] for obj in gt_objs], dtype=np.float32) if gt_objs else np.zeros((0, 4), dtype=np.float32),
+            'dimensions': np.ascontiguousarray([obj['dimensions_3d'] for obj in gt_objs], dtype=np.float32) if gt_objs else np.zeros((0, 3), dtype=np.float32),
+            'location': np.ascontiguousarray([obj['location_3d'] for obj in gt_objs], dtype=np.float32) if gt_objs else np.zeros((0, 3), dtype=np.float32),
+            'rotation_y': np.ascontiguousarray([obj['rotation_y'] for obj in gt_objs], dtype=np.float32) if gt_objs else np.zeros(0, dtype=np.float32)
         }
         gt_annotations.append(gt_ann)
 
@@ -114,18 +115,17 @@ def main():
 
         pred_ann = {
             'name': np.array([det.type for det in detections]),
-            'truncated': np.zeros(len(detections)),
-            'occluded': np.zeros(len(detections)),
-            'alpha': np.zeros(len(detections)),
-            'bbox': np.array(pred_bboxes_2d) if detections else np.zeros((0, 4)),
-            'dimensions': np.array([det.dimensions_3d for det in detections]) if detections else np.zeros((0, 3)),
-            'location': np.array([det.location_3d for det in detections]) if detections else np.zeros((0, 3)),
-            'rotation_y': np.array([det.rotation_y for det in detections]) if detections else np.zeros(0),
-            'score': np.array([det.score for det in detections]) if detections else np.zeros(0)
+            'truncated': np.zeros(len(detections), dtype=np.float32),
+            'occluded': np.zeros(len(detections), dtype=np.int32),
+            'alpha': np.zeros(len(detections), dtype=np.float32),
+            'bbox': np.ascontiguousarray(pred_bboxes_2d, dtype=np.float32) if detections else np.zeros((0, 4), dtype=np.float32),
+            'dimensions': np.ascontiguousarray([det.dimensions_3d for det in detections], dtype=np.float32) if detections else np.zeros((0, 3), dtype=np.float32),
+            'location': np.ascontiguousarray([det.location_3d for det in detections], dtype=np.float32) if detections else np.zeros((0, 3), dtype=np.float32),
+            'rotation_y': np.ascontiguousarray([det.rotation_y for det in detections], dtype=np.float32) if detections else np.zeros(0, dtype=np.float32),
+            'score': np.ascontiguousarray([det.score for det in detections], dtype=np.float32) if detections else np.zeros(0, dtype=np.float32)
         }
         pred_annotations.append(pred_ann)
 
-    # Calcolo Metriche Ufficiali KITTI tramite kitti_eval nativo
     classes = ['Car', 'Pedestrian', 'Cyclist']
     result_str, ret_dict = kitti_eval(gt_annotations, pred_annotations, classes)
 
