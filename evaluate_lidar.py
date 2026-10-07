@@ -73,7 +73,7 @@ def main():
         # Predizioni (Oggetti Detection3D)
         detections = detector.detect(sample)
         pred_ann = {
-            'name': np.array([det.obj_type for det in detections]),
+            'name': np.array([det.type for det in detections]),
             'truncated': np.zeros(len(detections)),
             'occluded': np.zeros(len(detections)),
             'alpha': np.zeros(len(detections)),
