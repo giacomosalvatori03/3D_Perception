@@ -1,8 +1,4 @@
 import os
-# Disabilita il driver CUDA di Numba PRIMA dell'import delle librerie
-os.environ["NUMBA_DISABLE_CUDA"] = "1"
-
-import gc
 import argparse
 import json
 import numpy as np
@@ -50,7 +46,7 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Valutazione KITTI Nativa mmdet3d")
+    parser = argparse.ArgumentParser(description="Valutazione KITTI Nativa CUDA mmdet3d")
     parser.add_argument("--data_path", type=str, default="/content/drive/MyDrive/3D_Perception/data/kitti_validation")
     parser.add_argument("--save_dir", type=str, default="/content/drive/MyDrive/3D_Perception/experiments")
     parser.add_argument("--subsample_mode", type=str, default="none", choices=["none", "random", "beam", "distance"])
@@ -68,6 +64,7 @@ def main():
 
     dataset = KittiDataset(
         data_root=args.data_path,
+        pts_dir='velodyne_reduced',
         subsample_mode=args.subsample_mode,
         subsample_ratio=args.subsample_ratio,
         num_beams=args.num_beams,
@@ -108,7 +105,7 @@ def main():
         }
         gt_annotations.append(gt_ann)
 
-        # Predizioni (Inferenza su GPU cuda:0)
+        # Predizioni (Inferenza GPU)
         detections = detector.detect(sample)
 
         pred_bboxes_2d = []
@@ -129,12 +126,7 @@ def main():
         }
         pred_annotations.append(pred_ann)
 
-    # Deallocazione memoria GPU per evitare collisioni CUDA
-    del detector
-    gc.collect()
-    torch.cuda.empty_cache()
-
-    # Calcolo Metriche Ufficiali mmdet3d kitti_eval
+    # Calcolo Metmetriche Ufficiali mmdet3d su GPU CUDA
     classes = ['Car', 'Pedestrian', 'Cyclist']
     result_str, ret_dict = kitti_eval(gt_annotations, pred_annotations, classes)
 
