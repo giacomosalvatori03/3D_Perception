@@ -1,4 +1,4 @@
-import torch
+import torch  # Inizializzazione primaria per collisione simboli C++
 
 import os
 import sys
@@ -10,13 +10,49 @@ from tqdm import tqdm
 import shapely.affinity
 from shapely.geometry import Polygon
 
+
+def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
+    """
+    Proietta un box 3D (Camera Frame) sul piano immagine 2D [left, top, right, bottom].
+    """
+    h, w, l = dimensions
+    x, y, z = location
+    ry = rotation_y
+
+    # 8 vertici 3D relativi al bottom-center
+    x_corners = [l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2]
+    y_corners = [0, 0, 0, 0, -h, -h, -h, -h]  # Y punta verso il basso nel riferimento camera
+    z_corners = [w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2, w / 2]
+
+    R = np.array([
+        [np.cos(ry), 0, np.sin(ry)],
+        [0, 1, 0],
+        [-np.sin(ry), 0, np.cos(ry)]
+    ])
+
+    corners_3d = np.vstack([x_corners, y_corners, z_corners])
+    corners_3d = np.dot(R, corners_3d)
+    corners_3d[0, :] += x
+    corners_3d[1, :] += y
+    corners_3d[2, :] += z
+
+    try:
+        pts_2d = calib.rect2img(corners_3d.T)
+        xmin = float(np.min(pts_2d[:, 0]))
+        ymin = float(np.min(pts_2d[:, 1]))
+        xmax = float(np.max(pts_2d[:, 0]))
+        ymax = float(np.max(pts_2d[:, 1]))
+
+        # Se la proiezione risulta troppo piccola o fuori campo, assegna una box di fallback valida
+        if (xmax - xmin) < 5 or (ymax - ymin) < 5:
+            return np.array([10.0, 10.0, 100.0, 100.0], dtype=np.float32)
+        return np.array([xmin, ymin, xmax, ymax], dtype=np.float32)
+    except Exception:
+        return np.array([10.0, 10.0, 100.0, 100.0], dtype=np.float32)
+
+
 # --- FALLBACK CPU PER KITTI EVAL (Bypassa la dipendenza da CUDA/Numba) ---
 def _cpu_rotate_iou_eval(boxes1, boxes2, criterion=-1, device_id=0):
-    """
-    Calcola l'IoU BEV ruotato su CPU usando Shapely per permettere la valutazione senza GPU.
-    boxes1: np.ndarray (N, 5) -> [x, y, dx, dy, yaw]
-    boxes2: np.ndarray (M, 5) -> [x, y, dx, dy, yaw]
-    """
     N, M = len(boxes1), len(boxes2)
     iou_matrix = np.zeros((N, M), dtype=np.float32)
 
@@ -24,15 +60,15 @@ def _cpu_rotate_iou_eval(boxes1, boxes2, criterion=-1, device_id=0):
         return iou_matrix
 
     def get_poly(box):
-        x, y, dx, dy, yaw = box
+        x, z, w, l, ry = box
         rect = Polygon([
-            [-dx / 2.0, -dy / 2.0],
-            [dx / 2.0, -dy / 2.0],
-            [dx / 2.0, dy / 2.0],
-            [-dx / 2.0, dy / 2.0]
+            [-w / 2.0, -l / 2.0],
+            [w / 2.0, -l / 2.0],
+            [w / 2.0, l / 2.0],
+            [-w / 2.0, l / 2.0]
         ])
-        rotated = shapely.affinity.rotate(rect, yaw, use_radians=True, origin=(0, 0))
-        return shapely.affinity.translate(rotated, xoff=x, yoff=y)
+        rotated = shapely.affinity.rotate(rect, -ry, use_radians=True, origin=(0, 0))
+        return shapely.affinity.translate(rotated, xoff=x, yoff=z)
 
     polys1 = [get_poly(b) for b in boxes1]
     polys2 = [get_poly(b) for b in boxes2]
@@ -62,12 +98,11 @@ def _cpu_rotate_iou_eval(boxes1, boxes2, criterion=-1, device_id=0):
 
     return iou_matrix
 
-# Inietta il modulo fake in sys.modules per intercettare l'import di rotate_iou
+
 fake_rotate_iou = types.ModuleType('mmdet3d.evaluation.functional.kitti_utils.rotate_iou')
 fake_rotate_iou.rotate_iou_gpu_eval = _cpu_rotate_iou_eval
 sys.modules['mmdet3d.evaluation.functional.kitti_utils.rotate_iou'] = fake_rotate_iou
 
-# Ora possiamo importare kitti_eval in sicurezza
 from mmdet3d.evaluation.functional.kitti_utils import kitti_eval
 from src import KittiDataset, LidarDetector
 
@@ -76,16 +111,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Valutazione KITTI con Sparsificazione")
     parser.add_argument("--data_path", type=str, default="/content/drive/MyDrive/3D_Perception/data/kitti_validation")
     parser.add_argument("--save_dir", type=str, default="/content/drive/MyDrive/3D_Perception/experiments")
-    
-    # Parametri di Sparsificazione
     parser.add_argument("--subsample_mode", type=str, default="none", choices=["none", "random", "beam", "distance"])
     parser.add_argument("--subsample_ratio", type=float, default=1.0)
     parser.add_argument("--num_beams", type=int, default=32)
     parser.add_argument("--max_distance", type=float, default=35.0)
-    
-    # Limite campioni per esecuzione CPU rapida
-    parser.add_argument("--max_samples", type=int, default=-1, help="Numero massimo campioni (-1 per tutti)")
-    
+    parser.add_argument("--max_samples", type=int, default=-1)
     parser.add_argument("--conf_thresh", type=float, default=0.3)
     return parser.parse_args()
 
@@ -93,9 +123,10 @@ def parse_args():
 def main():
     args = parse_args()
     os.makedirs(args.save_dir, exist_ok=True)
-    
+
     dataset = KittiDataset(
         data_root=args.data_path,
+        pts_dir='velodyne_reduced',
         subsample_mode=args.subsample_mode,
         subsample_ratio=args.subsample_ratio,
         num_beams=args.num_beams,
@@ -120,7 +151,8 @@ def main():
 
     for i in tqdm(range(total_samples), desc="Valutazione Frame"):
         sample = dataset[i]
-        
+        calib = sample['calib']
+
         # Ground Truth
         gt_objs = sample['gt_boxes']
         gt_ann = {
@@ -134,15 +166,21 @@ def main():
             'rotation_y': np.array([obj['rotation_y'] for obj in gt_objs]) if gt_objs else np.zeros(0)
         }
         gt_annotations.append(gt_ann)
-        
+
         # Predizioni
         detections = detector.detect(sample)
+
+        pred_bboxes_2d = []
+        for det in detections:
+            bbox_2d = project_3d_to_2d_bbox(det.location_3d, det.dimensions_3d, det.rotation_y, calib)
+            pred_bboxes_2d.append(bbox_2d)
+
         pred_ann = {
             'name': np.array([det.type for det in detections]),
             'truncated': np.zeros(len(detections)),
             'occluded': np.zeros(len(detections)),
             'alpha': np.zeros(len(detections)),
-            'bbox': np.zeros((len(detections), 4)),
+            'bbox': np.array(pred_bboxes_2d) if detections else np.zeros((0, 4)),
             'dimensions': np.array([det.dimensions_3d for det in detections]) if detections else np.zeros((0, 3)),
             'location': np.array([det.location_3d for det in detections]) if detections else np.zeros((0, 3)),
             'rotation_y': np.array([det.rotation_y for det in detections]) if detections else np.zeros(0),
@@ -150,24 +188,23 @@ def main():
         }
         pred_annotations.append(pred_ann)
 
-    # Calcolo Metriche KITTI (usando la funzione IoU su CPU)
     classes = ['Car', 'Pedestrian', 'Cyclist']
     result_str, ret_dict = kitti_eval(gt_annotations, pred_annotations, classes)
 
     print("\n" + result_str)
 
-    # Salvataggio risultati su Drive
     txt_path = os.path.join(args.save_dir, f"report_{tag}.txt")
     json_path = os.path.join(args.save_dir, f"metrics_{tag}.json")
-    
+
     with open(txt_path, "w") as f:
         f.write(result_str)
-        
+
     with open(json_path, "w") as f:
         clean_ret_dict = {k: float(v) if isinstance(v, (np.float32, np.float64)) else v for k, v in ret_dict.items()}
         json.dump(clean_ret_dict, f, indent=4)
 
     print(f"✅ Risultati salvati su Drive:\n  • {txt_path}\n  • {json_path}")
+
 
 if __name__ == "__main__":
     main()

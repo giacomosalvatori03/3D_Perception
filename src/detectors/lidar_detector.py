@@ -134,19 +134,22 @@ class LidarDetector(BaseDetector):
             pt_lidar = box_lidar[:3].reshape(1, 3)
             pt_cam = calib.velo2cam(pt_lidar)[0]
 
-            # 2. Dimensioni: [Altezza (dz), Lunghezza (dy), Larghezza (dx)]
-            dimensions_3d = [float(box_lidar[5]), float(box_lidar[4]), float(box_lidar[3])]
+            h = float(box_lidar[5])
+            w = float(box_lidar[3])
+            l = float(box_lidar[4])
+
+            # 2. Conversione da Centro di Gravità 3D a Bottom-Center (richiesto da KITTI)
+            location_3d_bottom = [float(pt_cam[0]), float(pt_cam[1] + h / 2.0), float(pt_cam[2])]
 
             # 3. Conversione dell'angolo Yaw (LiDAR) -> rotation_y (KITTI Camera)
             yaw = float(box_lidar[6])
             rotation_y = -yaw - np.pi / 2.0
             rotation_y = (rotation_y + np.pi) % (2 * np.pi) - np.pi
 
-        
             det = Detection3D(
                 obj_type=cls_name,
-                dimensions_3d=dimensions_3d,
-                location_3d=pt_cam,
+                dimensions_3d=[h, w, l], # [h, w, l] standard KITTI
+                location_3d=location_3d_bottom,
                 rotation_y=rotation_y,
                 score=score
             )
