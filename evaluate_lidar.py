@@ -5,7 +5,6 @@ import numpy as np
 from tqdm import tqdm
 import torch
 
-from mmdet3d.evaluation.functional.kitti_utils import kitti_eval
 from src import KittiDataset, LidarDetector
 
 
@@ -33,20 +32,59 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
 
     try:
         pts_2d = calib.rect2img(corners_3d.T)
-        xmin = float(np.min(pts_2d[:, 0]))
-        ymin = float(np.min(pts_2d[:, 1]))
+        xmin = max(0.0, float(np.min(pts_2d[:, 0])))
+        ymin = max(0.0, float(np.min(pts_2d[:, 1])))
         xmax = float(np.max(pts_2d[:, 0]))
         ymax = float(np.max(pts_2d[:, 1]))
 
         if (xmax - xmin) < 5 or (ymax - ymin) < 5:
-            return np.array([10.0, 10.0, 100.0, 100.0], dtype=np.float32)
-        return np.array([xmin, ymin, xmax, ymax], dtype=np.float32)
+            return [10.0, 10.0, 100.0, 100.0]
+        return [xmin, ymin, xmax, ymax]
     except Exception:
-        return np.array([10.0, 10.0, 100.0, 100.0], dtype=np.float32)
+        return [10.0, 10.0, 100.0, 100.0]
+
+
+def format_kitti_line(det, bbox_2d):
+    """
+    Formatta la predizione nel formato riga 15-valori KITTI standard:
+    type truncated occluded alpha bbox_2d(4) dimensions(3) location(3) rotation_y score
+    """
+    loc_x, loc_y, loc_z = det.location_3d
+    h, w, l = det.dimensions_3d
+    ry = det.rotation_y
+
+    # Alpha (angolo di osservazione): alpha = ry - arctan2(x, z)
+    alpha = ry - np.arctan2(loc_x, loc_z)
+    alpha = (alpha + np.pi) % (2 * np.pi) - np.pi
+
+    xmin, ymin, xmax, ymax = bbox_2d
+
+    return (
+        f"{det.type} 0.00 0 {alpha:.2f} "
+        f"{xmin:.2f} {ymin:.2f} {xmax:.2f} {ymax:.2f} "
+        f"{h:.2f} {w:.2f} {l:.2f} "
+        f"{loc_x:.2f} {loc_y:.2f} {loc_z:.2f} "
+        f"{ry:.2f} {det.score:.4f}\n"
+    )
+
+
+def format_gt_line(obj):
+    """Formatta un oggetto Ground Truth nel formato KITTI standard."""
+    loc_x, loc_y, loc_z = obj['location_3d']
+    h, w, l = obj['dimensions_3d']
+    xmin, ymin, xmax, ymax = obj['bbox_2d']
+    
+    return (
+        f"{obj['type']} {obj['truncation']:.2f} {int(obj['occlusion'])} {obj['alpha']:.2f} "
+        f"{xmin:.2f} {ymin:.2f} {xmax:.2f} {ymax:.2f} "
+        f"{h:.2f} {w:.2f} {l:.2f} "
+        f"{loc_x:.2f} {loc_y:.2f} {loc_z:.2f} "
+        f"{obj['rotation_y']:.2f}\n"
+    )
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Valutazione KITTI Nativa CUDA mmdet3d")
+    parser = argparse.ArgumentParser(description="Infezenza LiDAR e Salvataggio Predizioni KITTI")
     parser.add_argument("--data_path", type=str, default="/content/drive/MyDrive/3D_Perception/data/kitti_validation")
     parser.add_argument("--save_dir", type=str, default="/content/drive/MyDrive/3D_Perception/experiments")
     parser.add_argument("--subsample_mode", type=str, default="none", choices=["none", "random", "beam", "distance"])
@@ -60,7 +98,23 @@ def parse_args():
 
 def main():
     args = parse_args()
-    os.makedirs(args.save_dir, exist_ok=True)
+
+    # Tag dell'esperimento
+    if args.subsample_mode == 'random':
+        tag = f"random_{int(args.subsample_ratio * 100)}perc"
+    elif args.subsample_mode == 'beam':
+        tag = f"beam_{args.num_beams}rings"
+    elif args.subsample_mode == 'distance':
+        tag = f"dist_{int(args.max_distance)}m"
+    else:
+        tag = "baseline_100perc"
+
+    exp_dir = os.path.join(args.save_dir, tag)
+    pred_dir = os.path.join(exp_dir, "pred_labels")
+    gt_dir = os.path.join(exp_dir, "gt_labels")
+
+    os.makedirs(pred_dir, exist_ok=True)
+    os.makedirs(gt_dir, exist_ok=True)
 
     dataset = KittiDataset(
         data_root=args.data_path,
@@ -71,77 +125,38 @@ def main():
     )
     detector = LidarDetector(conf_threshold=args.conf_thresh)
 
-    if args.subsample_mode == 'random':
-        tag = f"random_{int(args.subsample_ratio * 100)}perc"
-    elif args.subsample_mode == 'beam':
-        tag = f"beam_{args.num_beams}rings"
-    elif args.subsample_mode == 'distance':
-        tag = f"dist_{int(args.max_distance)}m"
-    else:
-        tag = "baseline_100perc"
-
     total_samples = len(dataset) if args.max_samples <= 0 else min(args.max_samples, len(dataset))
-    print(f"\n📊 Avvio Valutazione GPU [{tag.upper()}] | Campioni: {total_samples}/{len(dataset)}")
+    print(f"\n📊 Avvio Inferenza PointPillars [{tag.upper()}] | Campioni: {total_samples}/{len(dataset)}")
+    print(f"💾 Destinazione file .txt su Drive: {exp_dir}")
 
-    gt_annotations = []
-    pred_annotations = []
-
-    for i in tqdm(range(total_samples), desc="Valutazione Frame"):
+    for i in tqdm(range(total_samples), desc="Elaborazione Frame"):
         sample = dataset[i]
         calib = sample['calib']
+        
+        # Recupera l'ID del frame (es. '000008')
+        sample_id = getattr(dataset, 'sample_ids', [f"{idx:06d}" for idx in range(len(dataset))])[i]
+        if isinstance(sample_id, int):
+            sample_id = f"{sample_id:06d}"
 
-        # Ground Truth
+        # 1. Salva Ground Truth .txt
         gt_objs = sample['gt_boxes']
-        gt_ann = {
-            'name': np.array([obj['type'] for obj in gt_objs]),
-            'truncated': np.ascontiguousarray([obj['truncation'] for obj in gt_objs], dtype=np.float32) if gt_objs else np.zeros(0, dtype=np.float32),
-            'occluded': np.ascontiguousarray([obj['occlusion'] for obj in gt_objs], dtype=np.int32) if gt_objs else np.zeros(0, dtype=np.int32),
-            'alpha': np.ascontiguousarray([obj['alpha'] for obj in gt_objs], dtype=np.float32) if gt_objs else np.zeros(0, dtype=np.float32),
-            'bbox': np.ascontiguousarray([obj['bbox_2d'] for obj in gt_objs], dtype=np.float32) if gt_objs else np.zeros((0, 4), dtype=np.float32),
-            'dimensions': np.ascontiguousarray([obj['dimensions_3d'] for obj in gt_objs], dtype=np.float32) if gt_objs else np.zeros((0, 3), dtype=np.float32),
-            'location': np.ascontiguousarray([obj['location_3d'] for obj in gt_objs], dtype=np.float32) if gt_objs else np.zeros((0, 3), dtype=np.float32),
-            'rotation_y': np.ascontiguousarray([obj['rotation_y'] for obj in gt_objs], dtype=np.float32) if gt_objs else np.zeros(0, dtype=np.float32)
-        }
-        gt_annotations.append(gt_ann)
+        gt_txt_path = os.path.join(gt_dir, f"{sample_id}.txt")
+        with open(gt_txt_path, "w") as f_gt:
+            for obj in gt_objs:
+                f_gt.write(format_gt_line(obj))
 
-        # Predizioni (Inferenza GPU)
+        # 2. Inferenza PointPillars ed esportazione Predizioni .txt
         detections = detector.detect(sample)
+        pred_txt_path = os.path.join(pred_dir, f"{sample_id}.txt")
+        
+        with open(pred_txt_path, "w") as f_pred:
+            for det in detections:
+                bbox_2d = project_3d_to_2d_bbox(det.location_3d, det.dimensions_3d, det.rotation_y, calib)
+                f_pred.write(format_kitti_line(det, bbox_2d))
 
-        pred_bboxes_2d = []
-        for det in detections:
-            bbox_2d = project_3d_to_2d_bbox(det.location_3d, det.dimensions_3d, det.rotation_y, calib)
-            pred_bboxes_2d.append(bbox_2d)
-
-        pred_ann = {
-            'name': np.array([det.type for det in detections]),
-            'truncated': np.zeros(len(detections), dtype=np.float32),
-            'occluded': np.zeros(len(detections), dtype=np.int32),
-            'alpha': np.zeros(len(detections), dtype=np.float32),
-            'bbox': np.ascontiguousarray(pred_bboxes_2d, dtype=np.float32) if detections else np.zeros((0, 4), dtype=np.float32),
-            'dimensions': np.ascontiguousarray([det.dimensions_3d for det in detections], dtype=np.float32) if detections else np.zeros((0, 3), dtype=np.float32),
-            'location': np.ascontiguousarray([det.location_3d for det in detections], dtype=np.float32) if detections else np.zeros((0, 3), dtype=np.float32),
-            'rotation_y': np.ascontiguousarray([det.rotation_y for det in detections], dtype=np.float32) if detections else np.zeros(0, dtype=np.float32),
-            'score': np.ascontiguousarray([det.score for det in detections], dtype=np.float32) if detections else np.zeros(0, dtype=np.float32)
-        }
-        pred_annotations.append(pred_ann)
-
-    # Calcolo Metmetriche Ufficiali mmdet3d su GPU CUDA
-    classes = ['Car', 'Pedestrian', 'Cyclist']
-    result_str, ret_dict = kitti_eval(gt_annotations, pred_annotations, classes)
-
-    print("\n" + result_str)
-
-    txt_path = os.path.join(args.save_dir, f"report_{tag}.txt")
-    json_path = os.path.join(args.save_dir, f"metrics_{tag}.json")
-
-    with open(txt_path, "w") as f:
-        f.write(result_str)
-
-    with open(json_path, "w") as f:
-        clean_ret_dict = {k: float(v) if isinstance(v, (np.float32, np.float64)) else v for k, v in ret_dict.items()}
-        json.dump(clean_ret_dict, f, indent=4)
-
-    print(f"✅ Risultati salvati su Drive:\n  • {txt_path}\n  • {json_path}")
+    print(f"\n✅ Inferenza e salvataggio completati con successo!")
+    print(f"  • Predizioni salvate in: {pred_dir}")
+    print(f"  • Ground Truth salvate in: {gt_dir}")
 
 
 if __name__ == "__main__":
