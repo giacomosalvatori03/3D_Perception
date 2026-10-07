@@ -168,20 +168,23 @@ class LidarDetector(BaseDetector):
             cls_name = self.class_names[cls_id] if cls_id < len(self.class_names) else 'Unknown'
 
             box_cam = cam_tensor[i]
-
-            # In CameraInstance3DBoxes di MMDetection3D:
-            # box_cam[0,1,2] = centro (x, y, z) - con origine (0.5, 1.0, 0.5) ovvero già la base inferiore!
-            # box_cam[3] = Width (w), box_cam[4] = Height (h), box_cam[5] = Length (l)
-            # box_cam[6] = Rotation Yaw (ry)
             loc = [float(box_cam[0]), float(box_cam[1]), float(box_cam[2])]
+
+            # CORREZIONE MAPPATURA DIMENSIONI (Inversione w <-> l):
+            # box_cam[4] = Height (h)
+            # box_cam[5] = Width (w)
+            # box_cam[3] = Length (l)
             h = float(box_cam[4])
-            w = float(box_cam[3])
-            l = float(box_cam[5])
+            w = float(box_cam[5])  # <--- Scambiato
+            l = float(box_cam[3])  # <--- Scambiato
+            dims = [h, w, l]
+
+            # Manteniamo l'angolo ry nativo del modello senza offset
             ry = float(box_cam[6])
 
             det = Detection3D(
                 obj_type=cls_name,
-                dimensions_3d=[h, w, l],
+                dimensions_3d=dims,
                 location_3d=loc,
                 rotation_y=ry,
                 score=score,
