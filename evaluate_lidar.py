@@ -1,14 +1,12 @@
-import torch  # Inizializzazione primaria per collisione simboli C++
-
 import os
-import sys
-import types
 import argparse
 import json
 import numpy as np
 from tqdm import tqdm
-import shapely.affinity
-from shapely.geometry import Polygon
+import torch
+
+from mmdet3d.evaluation.functional.kitti_utils import kitti_eval
+from src import KittiDataset, LidarDetector
 
 
 def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
@@ -21,9 +19,8 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
     x, y, z = location
     ry = rotation_y
 
-    # 8 vertici 3D nel riferimento camera quando ry=0 (l lungo X, w lungo Z)
     x_corners = [l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2]
-    y_corners = [0, 0, 0, 0, -h, -h, -h, -h]  # Da bottom-center (y) a top (y - h)
+    y_corners = [0, 0, 0, 0, -h, -h, -h, -h]
     z_corners = [w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2, w / 2]
 
     R = np.array([
@@ -52,124 +49,17 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
         return np.array([10.0, 10.0, 100.0, 100.0], dtype=np.float32)
 
 
-# --- FALLBACK CPU COMPLETO PER KITTI EVAL (BEV + 3D IoU) ---
-def _get_bev_inter_matrix(boxes1, boxes2):
-    N, M = len(boxes1), len(boxes2)
-    inter_matrix = np.zeros((N, M), dtype=np.float32)
-    if N == 0 or M == 0:
-        return inter_matrix
-
-    def get_poly(box):
-        x, z, w, l, ry = box
-        rect = Polygon([
-            [-w / 2.0, -l / 2.0],
-            [w / 2.0, -l / 2.0],
-            [w / 2.0, l / 2.0],
-            [-w / 2.0, l / 2.0]
-        ])
-        rotated = shapely.affinity.rotate(rect, -ry, use_radians=True, origin=(0, 0))
-        return shapely.affinity.translate(rotated, xoff=x, yoff=z)
-
-    polys1 = [get_poly(b) for b in boxes1]
-    polys2 = [get_poly(b) for b in boxes2]
-
-    for i in range(N):
-        p1 = polys1[i]
-        if not p1.is_valid or p1.area <= 0:
-            continue
-        for j in range(M):
-            p2 = polys2[j]
-            if not p2.is_valid or p2.area <= 0:
-                continue
-            try:
-                inter_matrix[i, j] = p1.intersection(p2).area
-            except Exception:
-                inter_matrix[i, j] = 0.0
-
-    return inter_matrix
-
-
-def _cpu_rotate_iou_eval(boxes1, boxes2, criterion=-1, device_id=0):
-    """Calcola la matrice IoU BEV 2D."""
-    N, M = len(boxes1), len(boxes2)
-    iou_matrix = np.zeros((N, M), dtype=np.float32)
-    if N == 0 or M == 0:
-        return iou_matrix
-
-    inter_matrix = _get_bev_inter_matrix(boxes1, boxes2)
-
-    areas1 = boxes1[:, 2] * boxes1[:, 3]
-    areas2 = boxes2[:, 2] * boxes2[:, 3]
-
-    for i in range(N):
-        for j in range(M):
-            inter = inter_matrix[i, j]
-            if criterion == -1:
-                union = areas1[i] + areas2[j] - inter
-                iou_matrix[i, j] = inter / union if union > 0 else 0.0
-            elif criterion == 0:
-                iou_matrix[i, j] = inter / areas1[i] if areas1[i] > 0 else 0.0
-            elif criterion == 1:
-                iou_matrix[i, j] = inter / areas2[j] if areas2[j] > 0 else 0.0
-
-    return iou_matrix
-
-
-def _cpu_d3_box_overlap_eval(boxes1, boxes2, criterion=-1):
-    """Calcola la matrice IoU 3D volumetrica per kitti_eval."""
-    N, M = len(boxes1), len(boxes2)
-    iou3d_matrix = np.zeros((N, M), dtype=np.float32)
-    if N == 0 or M == 0:
-        return iou3d_matrix
-
-    bev1 = boxes1[:, [0, 2, 4, 5, 6]]
-    bev2 = boxes2[:, [0, 2, 4, 5, 6]]
-    inter_bev = _get_bev_inter_matrix(bev1, bev2)
-
-    v1 = boxes1[:, 3] * boxes1[:, 4] * boxes1[:, 5]
-    v2 = boxes2[:, 3] * boxes2[:, 4] * boxes2[:, 5]
-
-    for i in range(N):
-        h1 = boxes1[i, 3]
-        y1_min, y1_max = boxes1[i, 1] - h1, boxes1[i, 1]
-
-        for j in range(M):
-            h2 = boxes2[j, 3]
-            y2_min, y2_max = boxes2[j, 1] - h2, boxes2[j, 1]
-
-            inter_y = max(0.0, min(y1_max, y2_max) - max(y1_min, y2_min))
-            inter_3d = inter_bev[i, j] * inter_y
-
-            if criterion == -1:
-                union_3d = v1[i] + v2[j] - inter_3d
-                iou3d_matrix[i, j] = inter_3d / union_3d if union_3d > 0 else 0.0
-            elif criterion == 0:
-                iou3d_matrix[i, j] = inter_3d / v1[i] if v1[i] > 0 else 0.0
-            elif criterion == 1:
-                iou3d_matrix[i, j] = inter_3d / v2[j] if v2[j] > 0 else 0.0
-
-    return iou3d_matrix
-
-
-# Inietta il modulo fake per intercettare sia BEV che 3D IoU
-fake_rotate_iou = types.ModuleType('mmdet3d.evaluation.functional.kitti_utils.rotate_iou')
-fake_rotate_iou.rotate_iou_gpu_eval = _cpu_rotate_iou_eval
-fake_rotate_iou.d3_box_overlap = _cpu_d3_box_overlap_eval
-fake_rotate_iou.d3_box_overlap_kernel = _cpu_d3_box_overlap_eval
-sys.modules['mmdet3d.evaluation.functional.kitti_utils.rotate_iou'] = fake_rotate_iou
-
-from mmdet3d.evaluation.functional.kitti_utils import kitti_eval
-from src import KittiDataset, LidarDetector
-
-
 def parse_args():
-    parser = argparse.ArgumentParser(description="Valutazione KITTI con Sparsificazione")
+    parser = argparse.ArgumentParser(description="Valutazione KITTI Nativa CUDA")
     parser.add_argument("--data_path", type=str, default="/content/drive/MyDrive/3D_Perception/data/kitti_validation")
     parser.add_argument("--save_dir", type=str, default="/content/drive/MyDrive/3D_Perception/experiments")
+    
+    # Parametri Sparsificazione
     parser.add_argument("--subsample_mode", type=str, default="none", choices=["none", "random", "beam", "distance"])
     parser.add_argument("--subsample_ratio", type=float, default=1.0)
     parser.add_argument("--num_beams", type=int, default=32)
     parser.add_argument("--max_distance", type=float, default=35.0)
+    
     parser.add_argument("--max_samples", type=int, default=-1)
     parser.add_argument("--conf_thresh", type=float, default=0.3)
     return parser.parse_args()
@@ -178,6 +68,9 @@ def parse_args():
 def main():
     args = parse_args()
     os.makedirs(args.save_dir, exist_ok=True)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"⚡ Device rilevato per l'inferenza: {device.upper()}")
 
     dataset = KittiDataset(
         data_root=args.data_path,
@@ -198,7 +91,7 @@ def main():
         tag = "baseline_100perc"
 
     total_samples = len(dataset) if args.max_samples <= 0 else min(args.max_samples, len(dataset))
-    print(f"\n📊 Avvio Valutazione [{tag.upper()}] | Campioni analizzati: {total_samples}/{len(dataset)}")
+    print(f"\n📊 Avvio Valutazione GPU [{tag.upper()}] | Campioni: {total_samples}/{len(dataset)}")
 
     gt_annotations = []
     pred_annotations = []
@@ -242,6 +135,7 @@ def main():
         }
         pred_annotations.append(pred_ann)
 
+    # Calcolo Metriche Ufficiali KITTI con C++/CUDA Extensions
     classes = ['Car', 'Pedestrian', 'Cyclist']
     result_str, ret_dict = kitti_eval(gt_annotations, pred_annotations, classes)
 
