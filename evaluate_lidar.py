@@ -53,34 +53,36 @@ def main():
     for i in range(len(dataset)):
         sample = dataset[i]
         
-        # Ground Truth
-        gt_objs = sample['gt_boxes']
-        gt_ann = {
-            'name': np.array([obj.type for obj in gt_objs]),
-            'truncated': np.zeros(len(gt_objs)),
-            'occluded': np.zeros(len(gt_objs)),
-            'alpha': np.zeros(len(gt_objs)),
-            'bbox': np.zeros((len(gt_objs), 4)),
-            'dimensions': np.array([[obj.dimensions[0], obj.dimensions[1], obj.dimensions[2]] for obj in gt_objs]) if gt_objs else np.zeros((0, 3)),
-            'location': np.array([obj.location for obj in gt_objs]) if gt_objs else np.zeros((0, 3)),
-            'rotation_y': np.array([obj.rotation_y for obj in gt_objs]) if gt_objs else np.zeros(0)
-        }
-        gt_annotations.append(gt_ann)
-        
-        # Predizioni
-        detections = detector.detect(sample)
-        pred_ann = {
-            'name': np.array([det.type for det in detections]),
-            'truncated': np.zeros(len(detections)),
-            'occluded': np.zeros(len(detections)),
-            'alpha': np.zeros(len(detections)),
-            'bbox': np.zeros((len(detections), 4)),
-            'dimensions': np.array([[det.dimensions[0], det.dimensions[1], det.dimensions[2]] for det in detections]) if detections else np.zeros((0, 3)),
-            'location': np.array([det.location for det in detections]) if detections else np.zeros((0, 3)),
-            'rotation_y': np.array([det.rotation_y for det in detections]) if detections else np.zeros(0),
-            'score': np.array([det.score for det in detections]) if detections else np.zeros(0)
-        }
-        pred_annotations.append(pred_ann)
+        # --- GROUND TRUTH (Dizionari da _parse_label) ---
+    gt_objs = sample['gt_boxes']
+    
+    gt_ann = {
+        'name': np.array([obj['type'] for obj in gt_objs]),
+        'truncated': np.array([obj['truncation'] for obj in gt_objs]) if gt_objs else np.zeros(0),
+        'occluded': np.array([obj['occlusion'] for obj in gt_objs]) if gt_objs else np.zeros(0),
+        'alpha': np.array([obj['alpha'] for obj in gt_objs]) if gt_objs else np.zeros(0),
+        'bbox': np.array([obj['bbox_2d'] for obj in gt_objs]) if gt_objs else np.zeros((0, 4)),
+        'dimensions': np.array([obj['dimensions_3d'] for obj in gt_objs]) if gt_objs else np.zeros((0, 3)), # [h, w, l]
+        'location': np.array([obj['location_3d'] for obj in gt_objs]) if gt_objs else np.zeros((0, 3)),   # [x, y, z] camera
+        'rotation_y': np.array([obj['rotation_y'] for obj in gt_objs]) if gt_objs else np.zeros(0)
+    }
+    gt_annotations.append(gt_ann)
+
+    # --- PREDIZIONI MODEL (Oggetti Detection3D) ---
+    detections = detector.detect(sample)
+    
+    pred_ann = {
+        'name': np.array([det.obj_type for det in detections]),
+        'truncated': np.zeros(len(detections)),
+        'occluded': np.zeros(len(detections)),
+        'alpha': np.zeros(len(detections)),
+        'bbox': np.zeros((len(detections), 4)),
+        'dimensions': np.array([det.dimensions_3d for det in detections]) if detections else np.zeros((0, 3)),
+        'location': np.array([det.location_3d for det in detections]) if detections else np.zeros((0, 3)),
+        'rotation_y': np.array([det.rotation_y for det in detections]) if detections else np.zeros(0),
+        'score': np.array([det.score for det in detections]) if detections else np.zeros(0)
+    }
+    pred_annotations.append(pred_ann)
 
     # 3. Calcolo Metriche Ufficiali
     classes = ['Car', 'Pedestrian', 'Cyclist']
