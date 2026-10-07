@@ -1,67 +1,67 @@
 import os
-import cv2
 import numpy as np
-from typing import Dict, List
-from src.calibration import Calibration
+from torch.utils.data import Dataset
+from .calibration import Calibration
+from .detection import Detection3D
+from scripts.sparsifier import LidarSparsifier
 
-class KittiDataset():
-    """
-    DataLoader modulare per KITTI 3D Object Detection.
-    Eredita da torch.utils.data.Dataset per essere direttamente compatibile
-    con PyTorch DataLoader e training loop nei progetti futuri.
-    """
-    def __init__(self, data_root, transform=None):
+class KittiDataset(Dataset):
+    def __init__(
+        self,
+        data_root: str,
+        subsample_mode: str = 'none',      # 'none', 'random', 'beam', 'distance'
+        subsample_ratio: float = 1.0,      # Usato per mode='random' (es. 0.5, 0.25, 0.1)
+        num_beams: int = 32,               # Usato per mode='beam' (es. 32, 16)
+        max_distance: float = 35.0         # Usato per mode='distance' (in metri)
+    ):
         self.data_root = data_root
-        self.transform = transform
+        self.subsample_mode = subsample_mode
+        self.subsample_ratio = subsample_ratio
+        self.num_beams = num_beams
+        self.max_distance = max_distance
 
-        self.image_dir = os.path.join(data_root, 'image_2')
-        self.velo_dir = os.path.join(data_root, 'velodyne_reduced')
-        self.calib_dir = os.path.join(data_root, 'calib')
-        self.label_dir = os.path.join(data_root, 'label_2')
+        self.pts_path = os.path.join(data_root, 'velodyne_reduced')
+        self.calib_path = os.path.join(data_root, 'calib')
+        self.label_path = os.path.join(data_root, 'label_2')
+        self.image_path = os.path.join(data_root, 'image_2')
 
-        # Carica la lista ordinata di tutti gli ID dei frame
         self.sample_ids = sorted([
-            os.path.splitext(f)[0] 
-            for f in os.listdir(self.image_dir) 
-            if f.endswith('.png')
+            os.path.splitext(f)[0] for f in os.listdir(self.pts_path) if f.endswith('.bin')
         ])
-        # print(f"📦 KittiDataset caricato da '{data_root}' ({self.velo_dir}): {len(self.sample_ids)} campioni trovati.")
 
     def __len__(self):
         return len(self.sample_ids)
 
-    def __getitem__(self, idx)-> Dict:
+    def __getitem__(self, idx: int) -> dict:
         sample_id = self.sample_ids[idx]
+        
+        # 1. Carica punti LiDAR (.bin)
+        bin_file = os.path.join(self.pts_path, f"{sample_id}.bin")
+        points = np.fromfile(bin_file, dtype=np.float32).reshape(-1, 4)
 
-        # 1. Carica Immagine RGB
-        img_path = os.path.join(self.image_dir, f"{sample_id}.png")
-        image = cv2.imread(img_path)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # 2. Applica sparsificazione se abilitata
+        if self.subsample_mode != 'none':
+            points = LidarSparsifier.sparsify(
+                points,
+                mode=self.subsample_mode,
+                ratio=self.subsample_ratio,
+                num_beams=self.num_beams,
+                max_distance=self.max_distance
+            )
 
-        # 2. Carica Point Cloud LiDAR (x, y, z, intensity)
-        velo_path = os.path.join(self.velo_dir, f"{sample_id}.bin")
-        points = np.fromfile(velo_path, dtype=np.float32).reshape(-1, 4)
+        # 3. Carica Calibration e Ground Truth
+        calib = Calibration(os.path.join(self.calib_path, f"{sample_id}.txt"))
+        gt_boxes = self._load_labels(os.path.join(self.label_path, f"{sample_id}.txt"))
+        
+        img_path = os.path.join(self.image_path, f"{sample_id}.png")
 
-        # 3. Carica Matrici di Calibrazione
-        calib_path = os.path.join(self.calib_dir, f"{sample_id}.txt")
-        calib = Calibration(calib_path)
-
-        # 4. Carica Ground Truth Labels (2D e 3D)
-        label_path = os.path.join(self.label_dir, f"{sample_id}.txt")
-        objects = self._parse_label(label_path)
-
-        sample = {
+        return {
             'sample_id': sample_id,
-            'image': image,           # np.ndarray (H, W, 3) uint8
-            'points': points,         # np.ndarray (N, 4) float32 [x, y, z, intensity]
-            'calib': calib,           # Istanza di Calibration
-            'labels': objects        # Lista di dizionari Ground Truth
+            'points': points,
+            'calib': calib,
+            'gt_boxes': gt_boxes,
+            'image_path': img_path if os.path.exists(img_path) else None
         }
-
-        if self.transform:
-            sample = self.transform(sample)
-
-        return sample
 
     def _parse_label(self, label_path):
         """
