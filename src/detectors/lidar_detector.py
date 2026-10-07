@@ -52,9 +52,17 @@ class LidarDetector(BaseDetector):
             print("✅ Download completato!")
 
         print(f"⚡ Caricamento PointPillars su {self.device}")
-        self.model = init_model(
-            self.config_path, self.checkpoint_path, device=self.device
-        )
+        self.model = init_model(self.config_path, self.checkpoint_path, device=self.device)
+
+        # ESTRAZIONE DINAMICA DELLE CLASSI DAI METADATI DEL MODELLO
+        if hasattr(self.model, 'dataset_meta') and 'classes' in self.model.dataset_meta:
+            self.class_names = list(self.model.dataset_meta['classes'])
+        elif hasattr(self.model, 'CLASSES'):
+            self.class_names = list(self.model.CLASSES)
+        else:
+            self.class_names = ['Car', 'Pedestrian', 'Cyclist']
+
+        print(f"🏷️ Mapping classi rilevato dal modello: {self.class_names}")
 
     def _get_rt_matrix(self, calib):
         """Estrae in modo rigoroso la matrice 4x4 di trasformazione LiDAR -> Camera Rectified (R0_rect @ Tr_velo_to_cam)."""
@@ -156,11 +164,8 @@ class LidarDetector(BaseDetector):
                 continue
 
             cls_id = int(labels[i])
-            cls_name = (
-                class_names[cls_id]
-                if cls_id < len(class_names)
-                else "Unknown"
-            )
+            # Usa self.class_names invece del vettore hardcoded
+            cls_name = self.class_names[cls_id] if cls_id < len(self.class_names) else 'Unknown'
 
             box_cam = cam_tensor[i]
 
