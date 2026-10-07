@@ -28,7 +28,13 @@ class LidarDetector(BaseDetector):
         # Inizializza i moduli interni di OpenMMLab
         register_all_modules(init_default_scope=True)
         
-        self.device = device if device else ('cuda' if torch.cuda.is_available() else 'cpu')
+        # Gestione corretta dell'indicizzazione GPU/CPU
+        if device is None:
+            self.device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+        elif device == 'cuda':
+            self.device = 'cuda:0'
+        else:
+            self.device = device
         print(f"⚙️ LidarDetector (mmdet3d) inizializzato su: {self.device}")
 
         self.checkpoint_path = checkpoint_path or 'weights/pointpillar_kitti.pth'
