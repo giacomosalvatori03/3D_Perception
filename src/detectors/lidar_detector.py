@@ -2,6 +2,7 @@ import os
 import urllib.request
 import torch
 import numpy as np
+import mmdet3d
 
 from mmdet3d.structures import Box3DMode
 from mmdet3d.apis import init_model, inference_detector
@@ -10,9 +11,24 @@ from .base_detector import BaseDetector, Detection3D
 # Risoluzione dinamica della root del progetto (2 livelli sopra src/detectors)
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 
-# URL Ufficiali OpenMMLab (mmdet3d v1.x)
+# URL dei Pesi Ufficiali OpenMMLab (mmdet3d v1.x)
 WEIGHTS_URL = "https://download.openmmlab.com/mmdetection3d/v1.0.0_models/pointpillars/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class_20220301_150306-37dc2420.pth"
-CONFIG_URL = "https://raw.githubusercontent.com/open-mmlab/mmdetection3d/main/configs/pointpillars/pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class.py"
+
+
+def get_default_config_path():
+    """Risolve il percorso del config PointPillars con albero _base_ integrato in mmdet3d."""
+    mmdet3d_dir = os.path.dirname(mmdet3d.__file__)
+    
+    # Percorso standard MIM dentro site-packages di mmdet3d
+    mim_config = os.path.join(
+        mmdet3d_dir, '.mim', 'configs', 'pointpillars', 
+        'pointpillars_hv_secfpn_8xb6-160e_kitti-3d-3class.py'
+    )
+    if os.path.exists(mim_config):
+        return mim_config
+        
+    # Percorso di fallback locale
+    return os.path.join(PROJECT_ROOT, 'configs', 'pointpillars_kitti.py')
 
 
 class LidarDetector(BaseDetector):
@@ -29,32 +45,26 @@ class LidarDetector(BaseDetector):
 
         self.conf_threshold = conf_threshold
 
-        # Percorsi di destinazione
-        self.config_path = config_path or os.path.join(PROJECT_ROOT, 'configs', 'pointpillars_kitti.py')
+        # Percorsi
+        self.config_path = config_path or get_default_config_path()
         self.checkpoint_path = checkpoint_path or os.path.join(PROJECT_ROOT, 'weights', 'pointpillar_kitti.pth')
-
-        # Download automatico del CONFIG se non presente
-        if not os.path.exists(self.config_path):
-            os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
-            print(f"📥 Config non trovato in '{self.config_path}'. Download in corso da OpenMMLab...")
-            urllib.request.urlretrieve(CONFIG_URL, self.config_path)
-            print("✅ Config scaricato con successo!")
 
         # Download automatico dei PESI se non presenti
         if not os.path.exists(self.checkpoint_path):
             os.makedirs(os.path.dirname(self.checkpoint_path), exist_ok=True)
-            print(f"📥 Pesi non trovati in '{self.checkpoint_path}'. Download in corso da OpenMMLab (~115 MB)...")
+            print(f"📥 Pesi non trovati in '{self.checkpoint_path}'. Download in corso (~115 MB)...")
             urllib.request.urlretrieve(WEIGHTS_URL, self.checkpoint_path)
             print("✅ Pesi scaricati con successo!")
 
-        print(f"⚡ Inizializzazione PointPillars su device: {self.device}")
+        print(f"🔧 Inizializzazione PointPillars su {self.device}")
+        print(f"📄 Config: {self.config_path}")
         self.model = init_model(self.config_path, self.checkpoint_path, device=self.device)
 
     def detect(self, sample):
         pts_path = sample['pts_path']
         calib = sample['calib']
 
-        # Inferenza del modello
+        # Inferenza
         result, _ = inference_detector(self.model, pts_path)
         pred_instances = result.pred_instances_3d
 
