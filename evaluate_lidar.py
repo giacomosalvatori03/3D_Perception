@@ -1,10 +1,74 @@
 import os
+import sys
+import types
 import argparse
 import json
 import numpy as np
 from tqdm import tqdm
+import shapely.affinity
+from shapely.geometry import Polygon
+
+# --- FALLBACK CPU PER KITTI EVAL (Bypassa la dipendenza da CUDA/Numba) ---
+def _cpu_rotate_iou_eval(boxes1, boxes2, criterion=-1, device_id=0):
+    """
+    Calcola l'IoU BEV ruotato su CPU usando Shapely per permettere la valutazione senza GPU.
+    boxes1: np.ndarray (N, 5) -> [x, y, dx, dy, yaw]
+    boxes2: np.ndarray (M, 5) -> [x, y, dx, dy, yaw]
+    """
+    N, M = len(boxes1), len(boxes2)
+    iou_matrix = np.zeros((N, M), dtype=np.float32)
+
+    if N == 0 or M == 0:
+        return iou_matrix
+
+    def get_poly(box):
+        x, y, dx, dy, yaw = box
+        rect = Polygon([
+            [-dx / 2.0, -dy / 2.0],
+            [dx / 2.0, -dy / 2.0],
+            [dx / 2.0, dy / 2.0],
+            [-dx / 2.0, dy / 2.0]
+        ])
+        rotated = shapely.affinity.rotate(rect, yaw, use_radians=True, origin=(0, 0))
+        return shapely.affinity.translate(rotated, xoff=x, yoff=y)
+
+    polys1 = [get_poly(b) for b in boxes1]
+    polys2 = [get_poly(b) for b in boxes2]
+
+    for i in range(N):
+        p1 = polys1[i]
+        if not p1.is_valid or p1.area <= 0:
+            continue
+        for j in range(M):
+            p2 = polys2[j]
+            if not p2.is_valid or p2.area <= 0:
+                continue
+            try:
+                inter = p1.intersection(p2).area
+                if criterion == -1:
+                    union = p1.area + p2.area - inter
+                    iou = inter / union if union > 0 else 0.0
+                elif criterion == 0:
+                    iou = inter / p1.area if p1.area > 0 else 0.0
+                elif criterion == 1:
+                    iou = inter / p2.area if p2.area > 0 else 0.0
+                else:
+                    iou = 0.0
+                iou_matrix[i, j] = iou
+            except Exception:
+                iou_matrix[i, j] = 0.0
+
+    return iou_matrix
+
+# Inietta il modulo fake in sys.modules per intercettare l'import di rotate_iou
+fake_rotate_iou = types.ModuleType('mmdet3d.evaluation.functional.kitti_utils.rotate_iou')
+fake_rotate_iou.rotate_iou_gpu_eval = _cpu_rotate_iou_eval
+sys.modules['mmdet3d.evaluation.functional.kitti_utils.rotate_iou'] = fake_rotate_iou
+
+# Ora possiamo importare kitti_eval in sicurezza
 from mmdet3d.evaluation.functional.kitti_utils import kitti_eval
 from src import KittiDataset, LidarDetector
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Valutazione KITTI con Sparsificazione")
@@ -17,11 +81,12 @@ def parse_args():
     parser.add_argument("--num_beams", type=int, default=32)
     parser.add_argument("--max_distance", type=float, default=35.0)
     
-    # Limite campioni per esecuzione CPU veloce (es. 200 o 500)
-    parser.add_argument("--max_samples", type=int, default=-1, help="Numero massimo di campioni da valutare (-1 per tutti)")
+    # Limite campioni per esecuzione CPU rapida
+    parser.add_argument("--max_samples", type=int, default=-1, help="Numero massimo campioni (-1 per tutti)")
     
     parser.add_argument("--conf_thresh", type=float, default=0.3)
     return parser.parse_args()
+
 
 def main():
     args = parse_args()
@@ -36,7 +101,6 @@ def main():
     )
     detector = LidarDetector(conf_threshold=args.conf_thresh)
 
-    # Naming file di output
     if args.subsample_mode == 'random':
         tag = f"random_{int(args.subsample_ratio * 100)}perc"
     elif args.subsample_mode == 'beam':
@@ -52,11 +116,10 @@ def main():
     gt_annotations = []
     pred_annotations = []
 
-    # Loop di Inferenza con barra di avanzamento tqdm
     for i in tqdm(range(total_samples), desc="Valutazione Frame"):
         sample = dataset[i]
         
-        # Ground Truth (Dizionari)
+        # Ground Truth
         gt_objs = sample['gt_boxes']
         gt_ann = {
             'name': np.array([obj['type'] for obj in gt_objs]),
@@ -70,7 +133,7 @@ def main():
         }
         gt_annotations.append(gt_ann)
         
-        # Predizioni (Oggetti Detection3D)
+        # Predizioni
         detections = detector.detect(sample)
         pred_ann = {
             'name': np.array([det.type for det in detections]),
@@ -85,13 +148,13 @@ def main():
         }
         pred_annotations.append(pred_ann)
 
-    # Calcolo Metrike KITTI
+    # Calcolo Metriche KITTI (usando la funzione IoU su CPU)
     classes = ['Car', 'Pedestrian', 'Cyclist']
     result_str, ret_dict = kitti_eval(gt_annotations, pred_annotations, classes)
 
     print("\n" + result_str)
 
-    # Salvataggio su Drive
+    # Salvataggio risultati su Drive
     txt_path = os.path.join(args.save_dir, f"report_{tag}.txt")
     json_path = os.path.join(args.save_dir, f"metrics_{tag}.json")
     
