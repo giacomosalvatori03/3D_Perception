@@ -21,10 +21,10 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
     x, y, z = location
     ry = rotation_y
 
-    # 8 vertici 3D nel riferimento camera (w sta lungo X, l sta lungo Z)
-    x_corners = [w / 2, w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2]
+    # 8 vertici 3D nel riferimento camera quando ry=0 (l lungo X, w lungo Z)
+    x_corners = [l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2]
     y_corners = [0, 0, 0, 0, -h, -h, -h, -h]  # Da bottom-center (y) a top (y - h)
-    z_corners = [l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2, l / 2]
+    z_corners = [w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2, w / 2]
 
     R = np.array([
         [np.cos(ry), 0, np.sin(ry)],
