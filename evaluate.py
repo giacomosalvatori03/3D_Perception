@@ -48,12 +48,16 @@ def load_kitti_txt(file_path, is_pred=False):
 
 
 def compute_bev_polygon(loc, dim, ry):
-    """Calcola il poligono BEV (Bird's Eye View) xz dato il centro, le dimensioni e rotation_y."""
+    """
+    Calcola il poligono BEV (xz) corretto nel riferimento Camera:
+    dim = [h, w, l] -> w lungo l'asse X, l lungo l'asse Z.
+    """
     h, w, l = dim
     x, y, z = loc
 
-    x_corners = [l/2, l/2, -l/2, -l/2]
-    z_corners = [w/2, -w/2, -w/2, w/2]
+    # x_corners estensione larghezza w (X), z_corners estensione lunghezza l (Z)
+    x_corners = [w / 2, w / 2, -w / 2, -w / 2]
+    z_corners = [l / 2, -l / 2, -l / 2, l / 2]
 
     R = np.array([
         [np.cos(ry), np.sin(ry)],
@@ -69,8 +73,8 @@ def compute_bev_polygon(loc, dim, ry):
 
 
 def compute_iou_3d(gt_loc, gt_dim, gt_ry, pred_loc, pred_dim, pred_ry):
-    """Calcola l'IoU 3D combinando l'overlap BEV con l'intersezione sull'asse Y."""
-    # 1. Overlap Y (Altezza)
+    """Calcola l'IoU 3D combinando l'overlap BEV e l'intersezione sull'asse Y."""
+    # Overlap Y (Altezza: in KITTI y_loc è la base del box, la cima è y_loc - h)
     gt_y_min, gt_y_max = gt_loc[1] - gt_dim[0], gt_loc[1]
     pred_y_min, pred_y_max = pred_loc[1] - pred_dim[0], pred_loc[1]
 
@@ -78,7 +82,6 @@ def compute_iou_3d(gt_loc, gt_dim, gt_ry, pred_loc, pred_dim, pred_ry):
     if inter_y <= 0:
         return 0.0
 
-    # 2. Overlap BEV (Shapely)
     try:
         poly_gt = compute_bev_polygon(gt_loc, gt_dim, gt_ry)
         poly_pred = compute_bev_polygon(pred_loc, pred_dim, pred_ry)
@@ -101,9 +104,7 @@ def compute_iou_3d(gt_loc, gt_dim, gt_ry, pred_loc, pred_dim, pred_ry):
 
 
 def eval_class_difficulty(gt_annos, pred_annos, cls_name, diff_level, iou_thresh):
-    """Calcola l'mAP40 per una specifica classe e livello di difficoltà."""
-    # Definizioni filtri KITTI
-    # diff_level: 0=Easy, 1=Moderate, 2=Hard
+    """Calcola mAP40 per classe e difficoltà (Easy, Moderate, Hard)."""
     all_gt_boxes = []
     all_pred_boxes = []
 
@@ -111,7 +112,7 @@ def eval_class_difficulty(gt_annos, pred_annos, cls_name, diff_level, iou_thresh
         if gt is None:
             continue
 
-        # Filtra GT per classe e difficoltà
+        # Filtro GT per classe e livello di difficoltà KITTI accumulato
         for j in range(len(gt['name'])):
             if gt['name'][j] != cls_name:
                 continue
@@ -120,13 +121,16 @@ def eval_class_difficulty(gt_annos, pred_annos, cls_name, diff_level, iou_thresh
             trunc = gt['truncated'][j]
             occ = gt['occluded'][j]
 
-            # Criteri di difficoltà KITTI
-            if diff_level == 0 and not (h_2d >= 40 and trunc <= 0.15 and occ == 0):
-                continue
-            elif diff_level == 1 and not (h_2d >= 25 and trunc <= 0.30 and occ <= 1):
-                continue
-            elif diff_level == 2 and not (h_2d >= 25 and trunc <= 0.50 and occ <= 2):
-                continue
+            # Criteri cumulatitivi standard KITTI
+            if diff_level == 0:  # Easy
+                if not (h_2d >= 40 and trunc <= 0.15 and occ == 0):
+                    continue
+            elif diff_level == 1:  # Moderate (Include Easy)
+                if not (h_2d >= 25 and trunc <= 0.30 and occ <= 1):
+                    continue
+            elif diff_level == 2:  # Hard (Include Easy e Moderate)
+                if not (h_2d >= 25 and trunc <= 0.50 and occ <= 2):
+                    continue
 
             all_gt_boxes.append({
                 'img_idx': img_idx,
@@ -136,7 +140,7 @@ def eval_class_difficulty(gt_annos, pred_annos, cls_name, diff_level, iou_thresh
                 'matched': False
             })
 
-        # Filtra Predizioni per classe
+        # Predizioni per la classe
         if pred is not None:
             for k in range(len(pred['name'])):
                 if pred['name'][k] == cls_name:
@@ -148,13 +152,10 @@ def eval_class_difficulty(gt_annos, pred_annos, cls_name, diff_level, iou_thresh
                         'score': pred['score'][k]
                     })
 
-    if not all_gt_boxes:
+    if not all_gt_boxes or not all_pred_boxes:
         return 0.0
 
-    if not all_pred_boxes:
-        return 0.0
-
-    # Ordina predizioni per score decrescente
+    # Ordina le predizioni per score decrescente
     all_pred_boxes.sort(key=lambda x: x['score'], reverse=True)
 
     tp = np.zeros(len(all_pred_boxes))
@@ -188,8 +189,8 @@ def eval_class_difficulty(gt_annos, pred_annos, cls_name, diff_level, iou_thresh
     recalls = tp_cumsum / len(all_gt_boxes)
     precisions = tp_cumsum / (tp_cumsum + fp_cumsum)
 
-    # Calcolo mAP40 (40 punti di recall campionati)
-    recall_thresholds = np.linspace(1/40, 1.0, 40)
+    # Campionamento a 40 punti di Recall (mAP40)
+    recall_thresholds = np.linspace(1 / 40, 1.0, 40)
     map40 = 0.0
 
     for r_thresh in recall_thresholds:
@@ -223,9 +224,9 @@ def main():
     diffs = ['Easy', 'Moderate', 'Hard']
     iou_thresholds = {'Car': 0.70, 'Pedestrian': 0.50, 'Cyclist': 0.50}
 
-    print("\n" + "="*55)
-    print(" 📊 RISULTATI mAP40 3D DETECTION (Python Puro / Shapely)")
-    print("="*55)
+    print("\n" + "=" * 55)
+    print(" 📊 RISULTATI mAP40 3D DETECTION (Python / Shapely)")
+    print("=" * 55)
     print(f"{'Class':<12} | {'Easy':<10} | {'Moderate':<10} | {'Hard':<10}")
     print("-" * 55)
 
@@ -241,10 +242,9 @@ def main():
         print(row_str)
         results_dict[cls] = cls_results
 
-    print("="*55)
+    print("=" * 55)
 
-    # Salvataggio JSON su Drive
-    report_json_path = os.path.join(args.save_dir if hasattr(args, 'save_dir') else args.exp_dir, "map40_results.json")
+    report_json_path = os.path.join(args.exp_dir, "map40_results.json")
     with open(report_json_path, "w") as f:
         json.dump(results_dict, f, indent=4)
     print(f"\n✅ Report salvato in: {report_json_path}")
