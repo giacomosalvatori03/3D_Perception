@@ -14,15 +14,17 @@ from shapely.geometry import Polygon
 def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
     """
     Proietta un box 3D (Camera Frame) sul piano immagine 2D [left, top, right, bottom].
+    location: [x, y, z] bottom-center
+    dimensions: [h, w, l]
     """
     h, w, l = dimensions
     x, y, z = location
     ry = rotation_y
 
-    # 8 vertici 3D relativi al bottom-center
-    x_corners = [l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2]
-    y_corners = [0, 0, 0, 0, -h, -h, -h, -h]  # Y punta verso il basso nel riferimento camera
-    z_corners = [w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2, w / 2]
+    # 8 vertici 3D nel riferimento camera (w sta lungo X, l sta lungo Z)
+    x_corners = [w / 2, w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2]
+    y_corners = [0, 0, 0, 0, -h, -h, -h, -h]  # Da bottom-center (y) a top (y - h)
+    z_corners = [l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2, l / 2]
 
     R = np.array([
         [np.cos(ry), 0, np.sin(ry)],
@@ -43,7 +45,6 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
         xmax = float(np.max(pts_2d[:, 0]))
         ymax = float(np.max(pts_2d[:, 1]))
 
-        # Se la proiezione risulta troppo piccola o fuori campo, assegna una box di fallback valida
         if (xmax - xmin) < 5 or (ymax - ymin) < 5:
             return np.array([10.0, 10.0, 100.0, 100.0], dtype=np.float32)
         return np.array([xmin, ymin, xmax, ymax], dtype=np.float32)
@@ -51,13 +52,12 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
         return np.array([10.0, 10.0, 100.0, 100.0], dtype=np.float32)
 
 
-# --- FALLBACK CPU PER KITTI EVAL (Bypassa la dipendenza da CUDA/Numba) ---
-def _cpu_rotate_iou_eval(boxes1, boxes2, criterion=-1, device_id=0):
+# --- FALLBACK CPU COMPLETO PER KITTI EVAL (BEV + 3D IoU) ---
+def _get_bev_inter_matrix(boxes1, boxes2):
     N, M = len(boxes1), len(boxes2)
-    iou_matrix = np.zeros((N, M), dtype=np.float32)
-
+    inter_matrix = np.zeros((N, M), dtype=np.float32)
     if N == 0 or M == 0:
-        return iou_matrix
+        return inter_matrix
 
     def get_poly(box):
         x, z, w, l, ry = box
@@ -82,25 +82,80 @@ def _cpu_rotate_iou_eval(boxes1, boxes2, criterion=-1, device_id=0):
             if not p2.is_valid or p2.area <= 0:
                 continue
             try:
-                inter = p1.intersection(p2).area
-                if criterion == -1:
-                    union = p1.area + p2.area - inter
-                    iou = inter / union if union > 0 else 0.0
-                elif criterion == 0:
-                    iou = inter / p1.area if p1.area > 0 else 0.0
-                elif criterion == 1:
-                    iou = inter / p2.area if p2.area > 0 else 0.0
-                else:
-                    iou = 0.0
-                iou_matrix[i, j] = iou
+                inter_matrix[i, j] = p1.intersection(p2).area
             except Exception:
-                iou_matrix[i, j] = 0.0
+                inter_matrix[i, j] = 0.0
+
+    return inter_matrix
+
+
+def _cpu_rotate_iou_eval(boxes1, boxes2, criterion=-1, device_id=0):
+    """Calcola la matrice IoU BEV 2D."""
+    N, M = len(boxes1), len(boxes2)
+    iou_matrix = np.zeros((N, M), dtype=np.float32)
+    if N == 0 or M == 0:
+        return iou_matrix
+
+    inter_matrix = _get_bev_inter_matrix(boxes1, boxes2)
+
+    areas1 = boxes1[:, 2] * boxes1[:, 3]
+    areas2 = boxes2[:, 2] * boxes2[:, 3]
+
+    for i in range(N):
+        for j in range(M):
+            inter = inter_matrix[i, j]
+            if criterion == -1:
+                union = areas1[i] + areas2[j] - inter
+                iou_matrix[i, j] = inter / union if union > 0 else 0.0
+            elif criterion == 0:
+                iou_matrix[i, j] = inter / areas1[i] if areas1[i] > 0 else 0.0
+            elif criterion == 1:
+                iou_matrix[i, j] = inter / areas2[j] if areas2[j] > 0 else 0.0
 
     return iou_matrix
 
 
+def _cpu_d3_box_overlap_eval(boxes1, boxes2, criterion=-1):
+    """Calcola la matrice IoU 3D volumetrica per kitti_eval."""
+    N, M = len(boxes1), len(boxes2)
+    iou3d_matrix = np.zeros((N, M), dtype=np.float32)
+    if N == 0 or M == 0:
+        return iou3d_matrix
+
+    bev1 = boxes1[:, [0, 2, 4, 5, 6]]
+    bev2 = boxes2[:, [0, 2, 4, 5, 6]]
+    inter_bev = _get_bev_inter_matrix(bev1, bev2)
+
+    v1 = boxes1[:, 3] * boxes1[:, 4] * boxes1[:, 5]
+    v2 = boxes2[:, 3] * boxes2[:, 4] * boxes2[:, 5]
+
+    for i in range(N):
+        h1 = boxes1[i, 3]
+        y1_min, y1_max = boxes1[i, 1] - h1, boxes1[i, 1]
+
+        for j in range(M):
+            h2 = boxes2[j, 3]
+            y2_min, y2_max = boxes2[j, 1] - h2, boxes2[j, 1]
+
+            inter_y = max(0.0, min(y1_max, y2_max) - max(y1_min, y2_min))
+            inter_3d = inter_bev[i, j] * inter_y
+
+            if criterion == -1:
+                union_3d = v1[i] + v2[j] - inter_3d
+                iou3d_matrix[i, j] = inter_3d / union_3d if union_3d > 0 else 0.0
+            elif criterion == 0:
+                iou3d_matrix[i, j] = inter_3d / v1[i] if v1[i] > 0 else 0.0
+            elif criterion == 1:
+                iou3d_matrix[i, j] = inter_3d / v2[j] if v2[j] > 0 else 0.0
+
+    return iou3d_matrix
+
+
+# Inietta il modulo fake per intercettare sia BEV che 3D IoU
 fake_rotate_iou = types.ModuleType('mmdet3d.evaluation.functional.kitti_utils.rotate_iou')
 fake_rotate_iou.rotate_iou_gpu_eval = _cpu_rotate_iou_eval
+fake_rotate_iou.d3_box_overlap = _cpu_d3_box_overlap_eval
+fake_rotate_iou.d3_box_overlap_kernel = _cpu_d3_box_overlap_eval
 sys.modules['mmdet3d.evaluation.functional.kitti_utils.rotate_iou'] = fake_rotate_iou
 
 from mmdet3d.evaluation.functional.kitti_utils import kitti_eval
@@ -126,6 +181,7 @@ def main():
 
     dataset = KittiDataset(
         data_root=args.data_path,
+        pts_dir='velodyne_reduced',
         subsample_mode=args.subsample_mode,
         subsample_ratio=args.subsample_ratio,
         num_beams=args.num_beams,
