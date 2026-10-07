@@ -10,11 +10,7 @@ from src import KittiDataset, LidarDetector
 
 
 def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
-    """
-    Proietta un box 3D (Camera Frame) sul piano immagine 2D [left, top, right, bottom].
-    location: [x, y, z] bottom-center
-    dimensions: [h, w, l]
-    """
+    """Proietta un box 3D (Camera Frame) sul piano immagine 2D [xmin, ymin, xmax, ymax]."""
     h, w, l = dimensions
     x, y, z = location
     ry = rotation_y
@@ -50,16 +46,13 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Valutazione KITTI Nativa CUDA")
+    parser = argparse.ArgumentParser(description="Valutazione KITTI Nativa CUDA mmdet3d")
     parser.add_argument("--data_path", type=str, default="/content/drive/MyDrive/3D_Perception/data/kitti_validation")
     parser.add_argument("--save_dir", type=str, default="/content/drive/MyDrive/3D_Perception/experiments")
-    
-    # Parametri Sparsificazione
     parser.add_argument("--subsample_mode", type=str, default="none", choices=["none", "random", "beam", "distance"])
     parser.add_argument("--subsample_ratio", type=float, default=1.0)
     parser.add_argument("--num_beams", type=int, default=32)
     parser.add_argument("--max_distance", type=float, default=35.0)
-    
     parser.add_argument("--max_samples", type=int, default=-1)
     parser.add_argument("--conf_thresh", type=float, default=0.3)
     return parser.parse_args()
@@ -68,9 +61,6 @@ def parse_args():
 def main():
     args = parse_args()
     os.makedirs(args.save_dir, exist_ok=True)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"⚡ Device rilevato per l'inferenza: {device.upper()}")
 
     dataset = KittiDataset(
         data_root=args.data_path,
@@ -91,7 +81,7 @@ def main():
         tag = "baseline_100perc"
 
     total_samples = len(dataset) if args.max_samples <= 0 else min(args.max_samples, len(dataset))
-    print(f"\n📊 Avvio Valutazione GPU [{tag.upper()}] | Campioni: {total_samples}/{len(dataset)}")
+    print(f"\n📊 Avvio Valutazione Nativa CUDA [{tag.upper()}] | Campioni: {total_samples}/{len(dataset)}")
 
     gt_annotations = []
     pred_annotations = []
@@ -114,7 +104,7 @@ def main():
         }
         gt_annotations.append(gt_ann)
 
-        # Predizioni
+        # Predizioni (Inferenza GPU)
         detections = detector.detect(sample)
 
         pred_bboxes_2d = []
@@ -135,7 +125,7 @@ def main():
         }
         pred_annotations.append(pred_ann)
 
-    # Calcolo Metriche Ufficiali KITTI con C++/CUDA Extensions
+    # Calcolo Metriche Ufficiali KITTI tramite kitti_eval nativo
     classes = ['Car', 'Pedestrian', 'Cyclist']
     result_str, ret_dict = kitti_eval(gt_annotations, pred_annotations, classes)
 
