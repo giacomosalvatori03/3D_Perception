@@ -5,6 +5,7 @@ from src.detection import Detection3D
 from src.detectors import BaseDetector, LidarDetector
 from src.visualizer import Visualizer
 from scripts.sparsifier import LidarSparsifier
+from scripts.lidar_evaluator import KittiEvaluator
 
 __all__ = [
     'KittiDataset',
@@ -13,5 +14,6 @@ __all__ = [
     'BaseDetector',
     'LidarDetector',
     'LidarSparsifier',
-    'Visualizer'
+    'Visualizer',
+    'KittiEvaluator',
 ]
