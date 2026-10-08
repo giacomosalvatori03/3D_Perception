@@ -1,49 +1,72 @@
 import numpy as np
 
+
 class LidarSparsifier:
+    """Utility class to apply LiDAR point cloud sparsification.
+
+    Supports vertical beam reduction and uniform random point drop.
     """
-    Module for synthetic sparsification of LiDAR point clouds.
-    Supports:
-      - 'random': uniform random subsampling.
-      - 'beam': reduction of the number of beams/rings.
-      - 'distance': filtering based on maximum distance radius.
-    """
+
+    def __init__(self):
+        pass
+
     @staticmethod
-    def sparsify(
+    def reduce_beams(
         points: np.ndarray,
-        mode: str = 'none',
-        ratio: float = 1.0,
-        num_beams: int = 32,
-        max_distance: float = 35.0
+        original_beams: int = 64,
+        target_beams: int = 32,
     ) -> np.ndarray:
-        if mode == 'none' or ratio >= 1.0:
+        """Simulates vertical beam reduction (e.g., 64-ring to 32 or 16 rings)
+
+        by computing point elevation angles and sampling uniform ring intervals.
+        """
+        if target_beams >= original_beams or target_beams <= 0:
             return points
 
-        if mode == 'random':
-            num_pts = int(len(points) * ratio)
-            indices = np.random.choice(len(points), size=num_pts, replace=False)
-            return points[indices]
+        x, y, z = points[:, 0], points[:, 1], points[:, 2]
+        depth = np.sqrt(x**2 + y**2 + z**2)
+        elevation = np.arcsin(np.clip(z / (depth + 1e-6), -1.0, 1.0))
 
-        elif mode == 'beam':
-            # Calculate the elevation angle (pitch) for each point
-            r = np.linalg.norm(points[:, :3], axis=1)
-            pitch = np.arcsin(np.clip(points[:, 2] / (r + 1e-6), -1.0, 1.0))
-            
-            # KITTI Velodyne HDL-32E has 64 vertical rings
-            total_rings = 64
-            bins = np.linspace(pitch.min(), pitch.max(), total_rings)
-            ring_ids = np.digitize(pitch, bins)
-            
-            # Calculate the stride to keep only 'num_beams' beams
-            stride = max(1, total_rings // num_beams)
-            allowed_rings = set(range(0, total_rings, stride))
-            
-            mask = np.isin(ring_ids, list(allowed_rings))
-            return points[mask]
+        min_el, max_el = elevation.min(), elevation.max()
+        if max_el - min_el < 1e-6:
+            return points
 
-        elif mode == 'distance':
-            # Keep points within the specified maximum distance from the origin
-            distances = np.linalg.norm(points[:, :3], axis=1)
-            return points[distances <= max_distance]
+        step = original_beams // target_beams
+        ring_ids = np.floor(
+            (elevation - min_el) / (max_el - min_el + 1e-6) * original_beams
+        ).astype(int)
 
-        return points
+        mask = (ring_ids % step) == 0
+        return points[mask]
+
+    @staticmethod
+    def random_drop(
+        points: np.ndarray, keep_ratio: float = 1.0
+    ) -> np.ndarray:
+        """Uniformly drops points at random to simulate lower point cloud density."""
+        if keep_ratio >= 1.0 or keep_ratio <= 0.0:
+            return points
+
+        num_points = points.shape[0]
+        num_keep = int(num_points * keep_ratio)
+        indices = np.random.choice(num_points, size=num_keep, replace=False)
+        return points[indices]
+
+    def apply_subsampling(
+        self,
+        points: np.ndarray,
+        mode: str = "none",
+        target_beams: int = 32,
+        keep_ratio: float = 0.5,
+    ) -> np.ndarray:
+        """Applies the selected subsampling strategy to the input point cloud."""
+        if mode == "beam_reduction":
+            return self.reduce_beams(
+                points, original_beams=64, target_beams=target_beams
+            )
+        elif mode == "random_drop":
+            return self.random_drop(points, keep_ratio=keep_ratio)
+        elif mode == "none":
+            return points
+        else:
+            raise ValueError(f"Unknown subsampling mode: {mode}")

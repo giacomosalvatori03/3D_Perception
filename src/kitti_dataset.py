@@ -11,14 +11,12 @@ class KittiDataset(Dataset):
         data_root: str,
         subsample_mode: str = 'none',      # 'none', 'random', 'beam', 'distance'
         subsample_ratio: float = 1.0,      # Used for mode='random' (es. 0.5, 0.25, 0.1)
-        num_beams: int = 32,               # Used for mode='beam' (es. 32, 16)
-        max_distance: float = 35.0         # Used for mode='distance' (in meters)
+        num_beams: int = 32               # Used for mode='beam' (es. 32, 16)
     ):
         self.data_root = data_root
         self.subsample_mode = subsample_mode
         self.subsample_ratio = subsample_ratio
         self.num_beams = num_beams
-        self.max_distance = max_distance
 
         self.pts_path = os.path.join(data_root, 'velodyne_reduced')
         self.calib_path = os.path.join(data_root, 'calib')
@@ -46,7 +44,6 @@ class KittiDataset(Dataset):
                 mode=self.subsample_mode,
                 ratio=self.subsample_ratio,
                 num_beams=self.num_beams,
-                max_distance=self.max_distance
             )
 
         # 3. Load Calibration and Ground Truth

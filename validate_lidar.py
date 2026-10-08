@@ -15,7 +15,7 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
 
     # In Camera Frame, X axis is width (w) and Z axis is length (l)
     x_corners = [w / 2, w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2]
-    y_corners = [0, 0, 0, 0, -h, -h, -h, -h]  # y is the height (h) in Camera Frame
+    y_corners = [0, 0, 0, 0, -h, -h, -h, -h]  # y is height (h) in Camera Frame
     z_corners = [l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2, l / 2]
 
     R = np.array(
@@ -52,7 +52,7 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
 
 
 def format_kitti_line(det, bbox_2d):
-    """Format the prediction in the KITTI standard 15-value row format:
+    """Format prediction in standard KITTI 15-value row format:
     type truncated occluded alpha bbox_2d(4) dimensions(3) location(3) rotation_y score"""
     loc_x, loc_y, loc_z = det.location_3d
     h, w, l = det.dimensions_3d
@@ -74,7 +74,7 @@ def format_kitti_line(det, bbox_2d):
 
 
 def format_gt_line(obj):
-    """Format a Ground Truth object in the KITTI standard format."""
+    """Format Ground Truth object in standard KITTI format."""
     loc_x, loc_y, loc_z = obj["location_3d"]
     h, w, l = obj["dimensions_3d"]
     xmin, ymin, xmax, ymax = obj["bbox_2d"]
@@ -106,11 +106,10 @@ def parse_args():
         "--subsample_mode",
         type=str,
         default="none",
-        choices=["none", "random", "beam", "distance"],
+        choices=["none", "random", "beam"],
     )
     parser.add_argument("--subsample_ratio", type=float, default=1.0)
     parser.add_argument("--num_beams", type=int, default=32)
-    parser.add_argument("--max_distance", type=float, default=35.0)
     parser.add_argument("--max_samples", type=int, default=-1)
     parser.add_argument("--conf_thresh", type=float, default=0.3)
     return parser.parse_args()
@@ -119,13 +118,11 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # Experiment tag based on subsampling mode
+    # Experiment tag based on active subsampling strategy
     if args.subsample_mode == "random":
         tag = f"random_{int(args.subsample_ratio * 100)}perc"
     elif args.subsample_mode == "beam":
         tag = f"beam_{args.num_beams}rings"
-    elif args.subsample_mode == "distance":
-        tag = f"dist_{int(args.max_distance)}m"
     else:
         tag = "baseline_100perc"
 
@@ -141,7 +138,6 @@ def main():
         subsample_mode=args.subsample_mode,
         subsample_ratio=args.subsample_ratio,
         num_beams=args.num_beams,
-        max_distance=args.max_distance,
     )
     detector = LidarDetector(conf_threshold=args.conf_thresh)
 
