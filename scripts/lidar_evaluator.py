@@ -16,16 +16,18 @@ except ImportError:
 
 
 class KittiEvaluator:
-    """Evaluator for KITTI 3D mAP40 metrics supporting Pandas DataFrames,
+    """Unified Evaluator for KITTI 3D mAP40 metrics.
 
-    HTML display in notebooks, and multi-format exports (.json, .csv, .md,
-    .tex).
+    Supports global overall evaluation, depth range-based breakdown (Near,
+    Medium, Far), Pandas DataFrames, and multi-format exports (.json, .csv,
+    .md, .tex) directly into experiment directories.
     """
 
     def __init__(
         self,
         classes: Optional[List[str]] = None,
         iou_thresholds: Optional[Dict[str, float]] = None,
+        ranges: Optional[Dict[str, Tuple[float, float]]] = None,
     ):
         self.classes = classes or ["Car", "Pedestrian", "Cyclist"]
         self.diffs = ["Easy", "Moderate", "Hard"]
@@ -33,6 +35,11 @@ class KittiEvaluator:
             "Car": 0.70,
             "Pedestrian": 0.50,
             "Cyclist": 0.50,
+        }
+        self.ranges = ranges or {
+            "Near (0-20m)": (0.0, 20.0),
+            "Medium (20-40m)": (20.0, 40.0),
+            "Far (40-70m)": (40.0, 70.0),
         }
 
     @staticmethod
@@ -97,13 +104,29 @@ class KittiEvaluator:
         }
 
     @staticmethod
+    def filter_anno_by_range(
+        anno: Optional[dict], min_dist: float, max_dist: float
+    ) -> Optional[dict]:
+        """Filters annotation dictionary keeping only objects within [min_dist, max_dist) Z-depth."""
+        if anno is None or len(anno["name"]) == 0:
+            return anno
+
+        depths = anno["location"][:, 2]
+        mask = (depths >= min_dist) & (depths < max_dist)
+
+        filtered = {}
+        for key, val in anno.items():
+            if isinstance(val, np.ndarray) and len(val) == len(depths):
+                filtered[key] = val[mask]
+            else:
+                filtered[key] = val
+        return filtered
+
+    @staticmethod
     def compute_bev_polygon(
         loc: np.ndarray, dim: np.ndarray, ry: float
     ) -> Polygon:
-        """Computes the BEV (xz) polygon in the Camera Rectified reference frame.
-
-        dim = [h, w, l] -> w along the X axis, l along the Z axis.
-        """
+        """Computes the BEV (xz) polygon in the Camera Rectified reference frame."""
         h, w, l = dim
         x, y, z = loc
 
@@ -167,7 +190,7 @@ class KittiEvaluator:
         occ: int,
         diff_level: int,
     ) -> Tuple[bool, bool]:
-        """Determines if a Ground Truth object belongs to the target class and whether it should be ignored according to KITTI difficulty thresholds."""
+        """Determines if a Ground Truth object belongs to the target class and whether it should be ignored."""
         ignored_classes = {
             "Car": ["Van", "DontCare"],
             "Pedestrian": ["Person_sitting", "DontCare"],
@@ -180,7 +203,6 @@ class KittiEvaluator:
         if name != cls_name:
             return False, False
 
-        # KITTI difficulty criteria
         is_easy = h_2d >= 40 and trunc <= 0.15 and occ == 0
         is_mod = h_2d >= 25 and trunc <= 0.30 and occ <= 1
         is_hard = h_2d >= 25 and trunc <= 0.50 and occ <= 2
@@ -249,13 +271,11 @@ class KittiEvaluator:
         if num_valid_gt == 0 or not all_pred_boxes:
             return 0.0
 
-        # Sort predictions by score descending
         all_pred_boxes.sort(key=lambda x: x["score"], reverse=True)
 
         tp = np.zeros(len(all_pred_boxes))
         fp = np.zeros(len(all_pred_boxes))
 
-        # Greedy matching
         for p_idx, pred in enumerate(all_pred_boxes):
             img_idx = pred["img_idx"]
             best_iou = -1.0
@@ -285,7 +305,6 @@ class KittiEvaluator:
             else:
                 fp[p_idx] = 1.0
 
-        # Precision-Recall curve
         tp_cumsum = np.cumsum(tp)
         fp_cumsum = np.cumsum(fp)
 
@@ -294,7 +313,6 @@ class KittiEvaluator:
             tp_cumsum + fp_cumsum, np.finfo(np.float64).eps
         )
 
-        # 40-point Recall sampling (mAP40)
         recall_thresholds = np.linspace(1 / 40, 1.0, 40)
         map40 = 0.0
 
@@ -312,10 +330,8 @@ class KittiEvaluator:
         save_exports: bool = True,
         verbose: bool = True,
     ) -> pd.DataFrame:
-        """Executes mAP40 evaluation, generates exportable files (.json, .csv, .md, .tex),
-
-        and displays a formatted HTML table in Jupyter/Colab.
-        """
+        """Executes global mAP40 evaluation across all objects."""
+        os.makedirs(exp_dir, exist_ok=True)
         pred_dir = os.path.join(exp_dir, "pred_labels")
         gt_dir = os.path.join(exp_dir, "gt_labels")
 
@@ -348,54 +364,120 @@ class KittiEvaluator:
                 cls_results[diff] = map_val
             results_dict[cls] = cls_results
 
-        # Construct Pandas DataFrame
         df = pd.DataFrame.from_dict(results_dict, orient="index")[self.diffs]
         df.index.name = "Class"
 
-        # Save JSON report
         if save_json:
             json_path = os.path.join(exp_dir, "map40_results.json")
             with open(json_path, "w") as f:
                 json.dump(results_dict, f, indent=4)
 
-        # Save multi-format table exports
         if save_exports:
-            # 1. CSV for data analysis/plotting
+            exp_name = os.path.basename(os.path.normpath(exp_dir))
             df.to_csv(os.path.join(exp_dir, "map40_results.csv"))
-
-            # 2. Markdown for documentation (e.g., GitHub, Notion)
             df.round(2).to_markdown(os.path.join(exp_dir, "map40_results.md"))
-
-            # 3. LaTeX table for academic papers and reports
             df.round(2).to_latex(
                 os.path.join(exp_dir, "map40_results.tex"),
-                caption=f"KITTI 3D Detection mAP40 - {os.path.basename(exp_dir)}",
-                label=f"tab:map40_{os.path.basename(exp_dir)}",
+                caption=f"KITTI 3D Detection mAP40 - {exp_name}",
+                label=f"tab:map40_{exp_name}",
             )
 
         if verbose:
-            print(
-                f"\n 3D DETECTION mAP40 RESULTS [{os.path.basename(exp_dir)}]\n"
-            )
+            exp_name = os.path.basename(os.path.normpath(exp_dir))
+            print(f"\n OVERALL 3D DETECTION mAP40 [{exp_name}]\n")
             if HAS_IPYTHON:
-                # Styled HTML table display for interactive notebooks
                 styled_df = df.style.format("{:.2f}%").set_caption(
-                    "KITTI 3D mAP40 Benchmark"
+                    f"KITTI 3D mAP40 Benchmark ({exp_name})"
                 )
                 display(styled_df)
             else:
                 print(df.to_string())
 
-            print(
-                f"\n Reports successfully saved in '{exp_dir}': .json, .csv, .md, .tex"
+            print(f"\n Reports saved in '{exp_dir}': .json, .csv, .md, .tex")
+
+        return df
+
+    def evaluate_ranges(
+        self,
+        exp_dir: str,
+        save_exports: bool = True,
+        verbose: bool = True,
+    ) -> pd.DataFrame:
+        """Executes range-based (distance-dependent) 3D mAP40 evaluation (Near, Medium, Far)."""
+        os.makedirs(exp_dir, exist_ok=True)
+        pred_dir = os.path.join(exp_dir, "pred_labels")
+        gt_dir = os.path.join(exp_dir, "gt_labels")
+
+        gt_files = sorted(glob.glob(os.path.join(gt_dir, "*.txt")))
+        if not gt_files:
+            raise FileNotFoundError(f"No .txt files found in {gt_dir}")
+
+        gt_annos_raw = []
+        pred_annos_raw = []
+
+        for gt_path in gt_files:
+            filename = os.path.basename(gt_path)
+            pred_path = os.path.join(pred_dir, filename)
+
+            gt_annos_raw.append(self.load_kitti_txt(gt_path, is_pred=False))
+            pred_annos_raw.append(self.load_kitti_txt(pred_path, is_pred=True))
+
+        records = []
+
+        for range_name, (min_d, max_d) in self.ranges.items():
+            gt_annos_filtered = [
+                self.filter_anno_by_range(a, min_d, max_d) for a in gt_annos_raw
+            ]
+            pred_annos_filtered = [
+                self.filter_anno_by_range(a, min_d, max_d) for a in pred_annos_raw
+            ]
+
+            for cls in self.classes:
+                for diff_idx, diff in enumerate(self.diffs):
+                    map_val = self.eval_class_difficulty(
+                        gt_annos_filtered,
+                        pred_annos_filtered,
+                        cls,
+                        diff_idx,
+                        self.iou_thresholds[cls],
+                    )
+                    records.append({
+                        "Range": range_name,
+                        "Class": cls,
+                        "Difficulty": diff,
+                        "mAP40": map_val,
+                    })
+
+        df = pd.DataFrame(records)
+
+        if save_exports:
+            df.to_csv(os.path.join(exp_dir, "map40_range_results.csv"), index=False)
+            with open(os.path.join(exp_dir, "map40_range_results.json"), "w") as f:
+                json.dump(records, f, indent=4)
+
+        if verbose:
+            exp_name = os.path.basename(os.path.normpath(exp_dir))
+            print(f"\n RANGE-BASED mAP40 RESULTS [{exp_name}]\n")
+            pivot_summary = df[df["Difficulty"] == "Moderate"].pivot(
+                index="Range", columns="Class", values="mAP40"
             )
+            if HAS_IPYTHON:
+                display(
+                    pivot_summary.style.format("{:.2f}%").set_caption(
+                        f"Range Breakdown Moderate mAP40 ({exp_name})"
+                    )
+                )
+            else:
+                print(pivot_summary.to_string())
+
+            print(f"\n Range reports saved in '{exp_dir}': .csv, .json")
 
         return df
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="KITTI 3D mAP40 Evaluation via CLI"
+        description="KITTI 3D mAP40 Unified Evaluation via CLI"
     )
     parser.add_argument(
         "--exp_dir",
@@ -403,7 +485,14 @@ if __name__ == "__main__":
         required=True,
         help="Path to experiment folder",
     )
+    parser.add_argument(
+        "--eval_ranges",
+        action="store_true",
+        help="Run depth-range evaluation in addition to global mAP40",
+    )
     args = parser.parse_args()
 
     evaluator = KittiEvaluator()
     evaluator.evaluate(args.exp_dir)
+    if args.eval_ranges:
+        evaluator.evaluate_ranges(args.exp_dir)
