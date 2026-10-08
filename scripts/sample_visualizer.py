@@ -202,7 +202,7 @@ class SampleVisualizer:
         num_samples: int = 3,
         conf_thresh: float = 0.3,
         save_plots: bool = True,
-        grid_layout: bool = True,
+        grid_layout: bool = True
     ):
         """Visualizes top complex frames in a compact grid format and saves non-empty images to Drive."""
         pred_dir = os.path.join(exp_dir, "pred_labels")
