@@ -4,11 +4,23 @@ import json
 import os
 from typing import Dict, List, Optional, Tuple
 import numpy as np
+import pandas as pd
 from shapely.geometry import Polygon
+
+try:
+    from IPython.display import display
+
+    HAS_IPYTHON = True
+except ImportError:
+    HAS_IPYTHON = False
 
 
 class KittiEvaluator:
-    """Evaluator for KITTI 3D mAP40 metrics implemented in native Python/Shapely."""
+    """Evaluator for KITTI 3D mAP40 metrics supporting Pandas DataFrames,
+
+    HTML display in notebooks, and multi-format exports (.json, .csv, .md,
+    .tex).
+    """
 
     def __init__(
         self,
@@ -25,7 +37,7 @@ class KittiEvaluator:
 
     @staticmethod
     def load_kitti_txt(file_path: str, is_pred: bool = False) -> Optional[dict]:
-        """Loads a KITTI .txt file and returns the annotations in a NumPy dictionary."""
+        """Loads a KITTI annotation file (.txt) and returns data as a NumPy dictionary."""
         if not os.path.exists(file_path):
             return None
 
@@ -88,7 +100,7 @@ class KittiEvaluator:
     def compute_bev_polygon(
         loc: np.ndarray, dim: np.ndarray, ry: float
     ) -> Polygon:
-        """Computes the BEV (xz) polygon correctly in the Camera reference frame:
+        """Computes the BEV (xz) polygon in the Camera Rectified reference frame.
 
         dim = [h, w, l] -> w along the X axis, l along the Z axis.
         """
@@ -116,7 +128,7 @@ class KittiEvaluator:
         pred_dim: np.ndarray,
         pred_ry: float,
     ) -> float:
-        """Computes the 3D IoU by combining BEV overlap and Y-axis intersection."""
+        """Computes 3D IoU by combining 2D BEV polygon overlap and Y-axis height overlap."""
         gt_y_min, gt_y_max = gt_loc[1] - gt_dim[0], gt_loc[1]
         pred_y_min, pred_y_max = pred_loc[1] - pred_dim[0], pred_loc[1]
 
@@ -155,7 +167,7 @@ class KittiEvaluator:
         occ: int,
         diff_level: int,
     ) -> Tuple[bool, bool]:
-        """Determines if a GT belongs to the class and if it should be ignored for difficulty."""
+        """Determines if a Ground Truth object belongs to the target class and whether it should be ignored according to KITTI difficulty thresholds."""
         ignored_classes = {
             "Car": ["Van", "DontCare"],
             "Pedestrian": ["Person_sitting", "DontCare"],
@@ -168,6 +180,7 @@ class KittiEvaluator:
         if name != cls_name:
             return False, False
 
+        # KITTI difficulty criteria
         is_easy = h_2d >= 40 and trunc <= 0.15 and occ == 0
         is_mod = h_2d >= 25 and trunc <= 0.30 and occ <= 1
         is_hard = h_2d >= 25 and trunc <= 0.50 and occ <= 2
@@ -189,7 +202,7 @@ class KittiEvaluator:
         diff_level: int,
         iou_thresh: float,
     ) -> float:
-        """Computes mAP40 for a single class and difficulty level."""
+        """Computes 3D mAP40 for a single class and difficulty level."""
         all_gt_boxes = []
         all_pred_boxes = []
         num_valid_gt = 0
@@ -236,11 +249,13 @@ class KittiEvaluator:
         if num_valid_gt == 0 or not all_pred_boxes:
             return 0.0
 
+        # Sort predictions by score descending
         all_pred_boxes.sort(key=lambda x: x["score"], reverse=True)
 
         tp = np.zeros(len(all_pred_boxes))
         fp = np.zeros(len(all_pred_boxes))
 
+        # Greedy matching
         for p_idx, pred in enumerate(all_pred_boxes):
             img_idx = pred["img_idx"]
             best_iou = -1.0
@@ -270,6 +285,7 @@ class KittiEvaluator:
             else:
                 fp[p_idx] = 1.0
 
+        # Precision-Recall curve
         tp_cumsum = np.cumsum(tp)
         fp_cumsum = np.cumsum(fp)
 
@@ -278,6 +294,7 @@ class KittiEvaluator:
             tp_cumsum + fp_cumsum, np.finfo(np.float64).eps
         )
 
+        # 40-point Recall sampling (mAP40)
         recall_thresholds = np.linspace(1 / 40, 1.0, 40)
         map40 = 0.0
 
@@ -289,9 +306,16 @@ class KittiEvaluator:
         return float((map40 / 40.0) * 100.0)
 
     def evaluate(
-        self, exp_dir: str, save_json: bool = True, verbose: bool = True
-    ) -> Dict[str, Dict[str, float]]:
-        """Executes the complete mAP40 evaluation on an experiment folder."""
+        self,
+        exp_dir: str,
+        save_json: bool = True,
+        save_exports: bool = True,
+        verbose: bool = True,
+    ) -> pd.DataFrame:
+        """Executes mAP40 evaluation, generates exportable files (.json, .csv, .md, .tex),
+
+        and displays a formatted HTML table in Jupyter/Colab.
+        """
         pred_dir = os.path.join(exp_dir, "pred_labels")
         gt_dir = os.path.join(exp_dir, "gt_labels")
 
@@ -311,17 +335,7 @@ class KittiEvaluator:
 
         results_dict = {}
 
-        if verbose:
-            print("\n" + "=" * 55)
-            print("  RESULTS mAP40 - 3D DETECTION EVALUATION")
-            print("=" * 55)
-            print(
-                f"{'Class':<12} | {'Easy':<10} | {'Moderate':<10} | {'Hard':<10}"
-            )
-            print("-" * 55)
-
         for cls in self.classes:
-            row_str = f"{cls:<12} | "
             cls_results = {}
             for diff_idx, diff in enumerate(self.diffs):
                 map_val = self.eval_class_difficulty(
@@ -331,35 +345,63 @@ class KittiEvaluator:
                     diff_idx,
                     self.iou_thresholds[cls],
                 )
-                row_str += f"{map_val:6.2f}%    | "
                 cls_results[diff] = map_val
-
-            if verbose:
-                print(row_str)
             results_dict[cls] = cls_results
 
-        if verbose:
-            print("=" * 55)
+        # Construct Pandas DataFrame
+        df = pd.DataFrame.from_dict(results_dict, orient="index")[self.diffs]
+        df.index.name = "Class"
 
+        # Save JSON report
         if save_json:
-            report_json_path = os.path.join(exp_dir, "map40_results.json")
-            with open(report_json_path, "w") as f:
+            json_path = os.path.join(exp_dir, "map40_results.json")
+            with open(json_path, "w") as f:
                 json.dump(results_dict, f, indent=4)
-            if verbose:
-                print(f" Report saved in: {report_json_path}")
 
-        return results_dict
+        # Save multi-format table exports
+        if save_exports:
+            # 1. CSV for data analysis/plotting
+            df.to_csv(os.path.join(exp_dir, "map40_results.csv"))
+
+            # 2. Markdown for documentation (e.g., GitHub, Notion)
+            df.round(2).to_markdown(os.path.join(exp_dir, "map40_results.md"))
+
+            # 3. LaTeX table for academic papers and reports
+            df.round(2).to_latex(
+                os.path.join(exp_dir, "map40_results.tex"),
+                caption=f"KITTI 3D Detection mAP40 - {os.path.basename(exp_dir)}",
+                label=f"tab:map40_{os.path.basename(exp_dir)}",
+            )
+
+        if verbose:
+            print(
+                f"\n 3D DETECTION mAP40 RESULTS [{os.path.basename(exp_dir)}]\n"
+            )
+            if HAS_IPYTHON:
+                # Styled HTML table display for interactive notebooks
+                styled_df = df.style.format("{:.2f}%").set_caption(
+                    "KITTI 3D mAP40 Benchmark"
+                )
+                display(styled_df)
+            else:
+                print(df.to_string())
+
+            print(
+                f"\n Reports successfully saved in '{exp_dir}': .json, .csv, .md, .tex"
+            )
+
+        return df
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Evaluate KITTI 3D mAP40 metrics for a given experiment folder."
+        description="KITTI 3D mAP40 Evaluation via CLI"
     )
     parser.add_argument(
         "--exp_dir",
         type=str,
         required=True,
-        help="Path to the experiment folder",
+        help="Path to experiment folder",
     )
     args = parser.parse_args()
 
