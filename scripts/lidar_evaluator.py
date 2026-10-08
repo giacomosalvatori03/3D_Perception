@@ -8,7 +8,7 @@ from shapely.geometry import Polygon
 
 
 class KittiEvaluator:
-    """Evaluator nativo in Python/Shapely per le metriche KITTI 3D mAP40."""
+    """Evaluator for KITTI 3D mAP40 metrics implemented in native Python/Shapely."""
 
     def __init__(
         self,
@@ -25,7 +25,7 @@ class KittiEvaluator:
 
     @staticmethod
     def load_kitti_txt(file_path: str, is_pred: bool = False) -> Optional[dict]:
-        """Legge un file .txt KITTI e restituisce le annotazioni in un dizionario NumPy."""
+        """Loads a KITTI .txt file and returns the annotations in a NumPy dictionary."""
         if not os.path.exists(file_path):
             return None
 
@@ -88,9 +88,9 @@ class KittiEvaluator:
     def compute_bev_polygon(
         loc: np.ndarray, dim: np.ndarray, ry: float
     ) -> Polygon:
-        """Calcola il poligono BEV (xz) corretto nel riferimento Camera:
+        """Computes the BEV (xz) polygon correctly in the Camera reference frame:
 
-        dim = [h, w, l] -> w lungo l'asse X, l lungo l'asse Z.
+        dim = [h, w, l] -> w along the X axis, l along the Z axis.
         """
         h, w, l = dim
         x, y, z = loc
@@ -116,7 +116,7 @@ class KittiEvaluator:
         pred_dim: np.ndarray,
         pred_ry: float,
     ) -> float:
-        """Calcola l'IoU 3D combinando l'overlap BEV e l'intersezione sull'asse Y."""
+        """Computes the 3D IoU by combining BEV overlap and Y-axis intersection."""
         gt_y_min, gt_y_max = gt_loc[1] - gt_dim[0], gt_loc[1]
         pred_y_min, pred_y_max = pred_loc[1] - pred_dim[0], pred_loc[1]
 
@@ -155,7 +155,7 @@ class KittiEvaluator:
         occ: int,
         diff_level: int,
     ) -> Tuple[bool, bool]:
-        """Determina se un GT appartiene alla classe e se deve essere ignorato per la difficoltà."""
+        """Determines if a GT belongs to the class and if it should be ignored for difficulty."""
         ignored_classes = {
             "Car": ["Van", "DontCare"],
             "Pedestrian": ["Person_sitting", "DontCare"],
@@ -189,7 +189,7 @@ class KittiEvaluator:
         diff_level: int,
         iou_thresh: float,
     ) -> float:
-        """Calcola mAP40 per una singola classe e livello di difficoltà."""
+        """Computes mAP40 for a single class and difficulty level."""
         all_gt_boxes = []
         all_pred_boxes = []
         num_valid_gt = 0
@@ -291,13 +291,13 @@ class KittiEvaluator:
     def evaluate(
         self, exp_dir: str, save_json: bool = True, verbose: bool = True
     ) -> Dict[str, Dict[str, float]]:
-        """Esegue la valutazione completa mAP40 su una cartella esperimento."""
+        """Executes the complete mAP40 evaluation on an experiment folder."""
         pred_dir = os.path.join(exp_dir, "pred_labels")
         gt_dir = os.path.join(exp_dir, "gt_labels")
 
         gt_files = sorted(glob.glob(os.path.join(gt_dir, "*.txt")))
         if not gt_files:
-            raise FileNotFoundError(f"Nessun file .txt trovato in {gt_dir}")
+            raise FileNotFoundError(f"No .txt files found in {gt_dir}")
 
         gt_annos = []
         pred_annos = []
@@ -313,7 +313,7 @@ class KittiEvaluator:
 
         if verbose:
             print("\n" + "=" * 55)
-            print(" 📊 RISULTATI mAP40 3D DETECTION (Python / Shapely)")
+            print("  RESULTS mAP40 - 3D DETECTION EVALUATION")
             print("=" * 55)
             print(
                 f"{'Class':<12} | {'Easy':<10} | {'Moderate':<10} | {'Hard':<10}"
@@ -346,20 +346,20 @@ class KittiEvaluator:
             with open(report_json_path, "w") as f:
                 json.dump(results_dict, f, indent=4)
             if verbose:
-                print(f"✅ Report salvato in: {report_json_path}")
+                print(f" Report saved in: {report_json_path}")
 
         return results_dict
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Valutazione KITTI mAP40 via CLI"
+        description="Evaluate KITTI 3D mAP40 metrics for a given experiment folder."
     )
     parser.add_argument(
         "--exp_dir",
         type=str,
         required=True,
-        help="Percorso cartella esperimento",
+        help="Path to the experiment folder",
     )
     args = parser.parse_args()
 

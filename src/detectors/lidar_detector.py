@@ -47,14 +47,14 @@ class LidarDetector(BaseDetector):
         )
         if not os.path.exists(self.checkpoint_path):
             os.makedirs(os.path.dirname(self.checkpoint_path), exist_ok=True)
-            print("📥 Download pesi ufficiali PointPillars in corso...")
+            print(" Download official PointPillars weights in progress...")
             urllib.request.urlretrieve(WEIGHTS_URL, self.checkpoint_path)
-            print("✅ Download completato!")
+            print(" Download completed!")
 
-        print(f"⚡ Caricamento PointPillars su {self.device}")
+        print(f" Loading PointPillars on {self.device}")
         self.model = init_model(self.config_path, self.checkpoint_path, device=self.device)
 
-        # ESTRAZIONE DINAMICA DELLE CLASSI DAI METADATI DEL MODELLO
+        # DYNAMIC CLASS MAPPING: Attempt to extract class names from the model's dataset_meta or CLASSES attribute
         if hasattr(self.model, 'dataset_meta') and 'classes' in self.model.dataset_meta:
             self.class_names = list(self.model.dataset_meta['classes'])
         elif hasattr(self.model, 'CLASSES'):
@@ -62,13 +62,13 @@ class LidarDetector(BaseDetector):
         else:
             self.class_names = ['Car', 'Pedestrian', 'Cyclist']
 
-        print(f"🏷️ Mapping classi rilevato dal modello: {self.class_names}")
+        print(f" Classes mapping extracted from the model: {self.class_names}")
 
     def _get_rt_matrix(self, calib):
-        """Estrae in modo rigoroso la matrice 4x4 di trasformazione LiDAR -> Camera Rectified (R0_rect @ Tr_velo_to_cam)."""
+        """Extracts the 4x4 transformation matrix from LiDAR to Rectified Camera (R0_rect @ Tr_velo_to_cam) in a robust manner."""
         r0, v2c = None, None
 
-        # 1. Estrazione flessibile da Dizionario o Oggetto Calibration
+        # 1. Flexible extraction from Dictionary or Calibration Object
         if isinstance(calib, dict):
             r0 = (
                 calib.get("R0_rect")
@@ -98,7 +98,7 @@ class LidarDetector(BaseDetector):
                     v2c = getattr(calib, attr)
                     break
 
-        # 2. Costruzione e validazione della matrice 4x4
+        # 2. Construction and validation of the 4x4 matrix
         if r0 is not None and v2c is not None and not callable(v2c):
             r0_arr = np.asarray(r0, dtype=np.float32)
             v2c_arr = np.asarray(v2c, dtype=np.float32)
@@ -117,7 +117,7 @@ class LidarDetector(BaseDetector):
             # R0_rect @ Tr_velo_to_cam
             return (r0_4x4 @ v2c_4x4).astype(np.float32)
 
-        # 3. Fallback tramite metodo di proiezione se presente
+        # 3. Fallback from velo2cam method if available
         if hasattr(calib, "velo2cam") and callable(getattr(calib, "velo2cam")):
             pts = np.array(
                 [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=np.float32
@@ -130,9 +130,9 @@ class LidarDetector(BaseDetector):
             mat[:3, 3] = t
             return mat.astype(np.float32)
 
-        # Se non troviamo la calibrazione, solleviamo un errore esplicito anziché fallire in silenzio
+        # If we don't find the calibration, raise an explicit error instead of failing silently
         raise AttributeError(
-            "❌ Errore Calibrazione: Impossibile trovare R0_rect e/o Tr_velo_to_cam nell'oggetto calib!"
+            " Calibration Error: Unable to find R0_rect and/or Tr_velo_to_cam in the calib object!"
         )
 
     def detect(self, sample):
@@ -153,7 +153,8 @@ class LidarDetector(BaseDetector):
         if len(scores) == 0:
             return detections
 
-        # Conversione coordinata dal riferimento LiDAR al riferimento Camera Rettificato
+
+        # Convert the 3D bounding boxes from LiDAR coordinates to Camera coordinates using the calibration matrix
         rt_mat = self._get_rt_matrix(calib)
         bboxes_cam = bboxes_3d.convert_to(Box3DMode.CAM, rt_mat)
         cam_tensor = bboxes_cam.tensor.cpu().numpy()
@@ -164,22 +165,18 @@ class LidarDetector(BaseDetector):
                 continue
 
             cls_id = int(labels[i])
-            # Usa self.class_names invece del vettore hardcoded
+            # Uses self.class_names to ensure dynamic mapping based on the model's dataset_meta or CLASSES attribute
             cls_name = self.class_names[cls_id] if cls_id < len(self.class_names) else 'Unknown'
 
             box_cam = cam_tensor[i]
             loc = [float(box_cam[0]), float(box_cam[1]), float(box_cam[2])]
 
-            # CORREZIONE MAPPATURA DIMENSIONI (Inversione w <-> l):
-            # box_cam[4] = Height (h)
-            # box_cam[5] = Width (w)
-            # box_cam[3] = Length (l)
-            h = float(box_cam[4])
-            w = float(box_cam[5])  # <--- Scambiato
-            l = float(box_cam[3])  # <--- Scambiato
+            h = float(box_cam[4])   # Height (h)
+            w = float(box_cam[5])   # Width (w)
+            l = float(box_cam[3])   # Length (l)
             dims = [h, w, l]
 
-            # Manteniamo l'angolo ry nativo del modello senza offset
+            # Set the ry (rotation around the Y-axis) from the camera coordinates
             ry = float(box_cam[6])
 
             det = Detection3D(

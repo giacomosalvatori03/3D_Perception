@@ -4,7 +4,7 @@ from src.detection import Detection3D
 
 class BaseDetector(ABC):
     """
-    Classe base astratta per tutti i detector del progetto.
+    Abstract base class for 3D object detectors. 
     """
     def __init__(self, conf_threshold: float = 0.5):
         self.conf_threshold = conf_threshold
@@ -12,12 +12,12 @@ class BaseDetector(ABC):
     @abstractmethod
     def detect(self, sample: dict) -> List[Detection3D]:
         """
-        Metodo astratto da implementare nelle sottoclassi.
+        Abstract method to be implemented in subclasses.
         
-        Parametri:
-            sample (dict): Elemento restituito dal KittiDataset contenente 'image', 'points', 'calib', etc.
+        Parameters:
+            sample (dict): Element returned by the KittiDataset containing 'image', 'points', 'calib', etc.
             
-        Restituisce:
-            List[Detection3D]: Lista delle predizioni 3D rilevate.
+        Returns:
+            List[Detection3D]: List of Detection3D objects representing the detected 3D objects.
         """
         pass

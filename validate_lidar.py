@@ -8,14 +8,14 @@ from tqdm import tqdm
 
 
 def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
-    """Proietta un box 3D (Camera Frame) sul piano immagine 2D [xmin, ymin, xmax, ymax]."""
+    """Projects a 3D bounding box (Camera Frame) onto the 2D image plane [xmin, ymin, xmax, ymax]."""
     h, w, l = dimensions
     x, y, z = location
     ry = rotation_y
 
-    # CORRETTO: In Camera Frame l'asse X corrisponde alla larghezza (w) e Z alla lunghezza (l)
+    # In Camera Frame, X axis is width (w) and Z axis is length (l)
     x_corners = [w / 2, w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2]
-    y_corners = [0, 0, 0, 0, -h, -h, -h, -h]  # y è la base inferiore
+    y_corners = [0, 0, 0, 0, -h, -h, -h, -h]  # y is the height (h) in Camera Frame
     z_corners = [l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2, l / 2]
 
     R = np.array(
@@ -33,7 +33,7 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
     corners_3d[1, :] += y
     corners_3d[2, :] += z
 
-    # Filtro di sicurezza per oggetti dietro o troppo vicini alla fotocamera
+    # Security filter for objects behind or too close to the camera
     if np.any(corners_3d[2, :] <= 0.1):
         return [10.0, 10.0, 100.0, 100.0]
 
@@ -52,16 +52,13 @@ def project_3d_to_2d_bbox(location, dimensions, rotation_y, calib):
 
 
 def format_kitti_line(det, bbox_2d):
-    """Formatta la predizione nel formato riga 15-valori KITTI standard:
-
-    type truncated occluded alpha bbox_2d(4) dimensions(3) location(3)
-    rotation_y score
-    """
+    """Format the prediction in the KITTI standard 15-value row format:
+    type truncated occluded alpha bbox_2d(4) dimensions(3) location(3) rotation_y score"""
     loc_x, loc_y, loc_z = det.location_3d
     h, w, l = det.dimensions_3d
     ry = det.rotation_y
 
-    # Alpha (angolo di osservazione): alpha = ry - arctan2(x, z)
+    # Alpha (observational angle): alpha = ry - arctan2(x, z)
     alpha = ry - np.arctan2(loc_x, loc_z)
     alpha = (alpha + np.pi) % (2 * np.pi) - np.pi
 
@@ -77,7 +74,7 @@ def format_kitti_line(det, bbox_2d):
 
 
 def format_gt_line(obj):
-    """Formatta un oggetto Ground Truth nel formato KITTI standard."""
+    """Format a Ground Truth object in the KITTI standard format."""
     loc_x, loc_y, loc_z = obj["location_3d"]
     h, w, l = obj["dimensions_3d"]
     xmin, ymin, xmax, ymax = obj["bbox_2d"]
@@ -93,7 +90,7 @@ def format_gt_line(obj):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Inferenza LiDAR e Salvataggio Predizioni KITTI"
+        description="LiDAR Inference and Evaluation on KITTI Dataset with PointPillars"
     )
     parser.add_argument(
         "--data_path",
@@ -122,7 +119,7 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # Tag dell'esperimento
+    # Experiment tag based on subsampling mode
     if args.subsample_mode == "random":
         tag = f"random_{int(args.subsample_ratio * 100)}perc"
     elif args.subsample_mode == "beam":
@@ -154,28 +151,28 @@ def main():
         else min(args.max_samples, len(dataset))
     )
     print(
-        f"\n📊 Avvio Inferenza PointPillars [{tag.upper()}] | Campioni: {total_samples}/{len(dataset)}"
+        f"\n Starting PointPillars Inference [{tag.upper()}] | Samples: {total_samples}/{len(dataset)}"
     )
-    print(f"💾 Destinazione file .txt su Drive: {exp_dir}")
+    print(f" Destination for .txt files on Drive: {exp_dir}")
 
-    for i in tqdm(range(total_samples), desc="Elaborazione Frame"):
+    for i in tqdm(range(total_samples), desc="Processing Frames"):
         sample = dataset[i]
         calib = sample["calib"]
 
-        # Recupero ID del frame con formattazione a 6 cifre
+        # Retrieve frame ID with 6-digit formatting
         if hasattr(dataset, "sample_ids") and i < len(dataset.sample_ids):
             sample_id = str(dataset.sample_ids[i]).zfill(6)
         else:
             sample_id = f"{i:06d}"
 
-        # 1. Salva Ground Truth .txt
+        # 1. Save Ground Truth .txt
         gt_objs = sample["gt_boxes"]
         gt_txt_path = os.path.join(gt_dir, f"{sample_id}.txt")
         with open(gt_txt_path, "w") as f_gt:
             for obj in gt_objs:
                 f_gt.write(format_gt_line(obj))
 
-        # 2. Inferenza PointPillars ed esportazione Predizioni .txt
+        # 2. PointPillars Inference and Export Predictions .txt
         detections = detector.detect(sample)
         pred_txt_path = os.path.join(pred_dir, f"{sample_id}.txt")
 
@@ -186,9 +183,9 @@ def main():
                 )
                 f_pred.write(format_kitti_line(det, bbox_2d))
 
-    print(f"\n✅ Inferenza e salvataggio completati con successo!")
-    print(f"  • Predizioni salvate in: {pred_dir}")
-    print(f"  • Ground Truth salvate in: {gt_dir}")
+    print(f"\n Inference and saving completed successfully!")
+    print(f"  • Predictions saved in: {pred_dir}")
+    print(f"  • Ground Truth saved in: {gt_dir}")
 
 
 if __name__ == "__main__":

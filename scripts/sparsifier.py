@@ -2,11 +2,11 @@ import numpy as np
 
 class LidarSparsifier:
     """
-    Modulo per la sparsificazione sintetica delle nuvole di punti LiDAR.
-    Supporta:
-      - 'random': sottocampionamento casuale uniforme.
-      - 'beam': riduzione del numero di fasci/ring verticali.
-      - 'distance': filtraggio basato sul raggio di distanza massimo.
+    Module for synthetic sparsification of LiDAR point clouds.
+    Supports:
+      - 'random': uniform random subsampling.
+      - 'beam': reduction of the number of beams/rings.
+      - 'distance': filtering based on maximum distance radius.
     """
     @staticmethod
     def sparsify(
@@ -25,16 +25,16 @@ class LidarSparsifier:
             return points[indices]
 
         elif mode == 'beam':
-            # Calcolo angolo di elevazione (pitch) per ogni punto
+            # Calculate the elevation angle (pitch) for each point
             r = np.linalg.norm(points[:, :3], axis=1)
             pitch = np.arcsin(np.clip(points[:, 2] / (r + 1e-6), -1.0, 1.0))
             
-            # KITTI Velodyne HDL-64E ha 64 ring verticali
+            # KITTI Velodyne HDL-32E has 64 vertical rings
             total_rings = 64
             bins = np.linspace(pitch.min(), pitch.max(), total_rings)
             ring_ids = np.digitize(pitch, bins)
             
-            # Calcola lo stride per mantenere solo 'num_beams' fasci
+            # Calculate the stride to keep only 'num_beams' beams
             stride = max(1, total_rings // num_beams)
             allowed_rings = set(range(0, total_rings, stride))
             
@@ -42,7 +42,7 @@ class LidarSparsifier:
             return points[mask]
 
         elif mode == 'distance':
-            # Mantiene solo i punti entro il raggio max_distance
+            # Keep points within the specified maximum distance from the origin
             distances = np.linalg.norm(points[:, :3], axis=1)
             return points[distances <= max_distance]
 

@@ -2,17 +2,17 @@ import numpy as np
 
 class Detection3D:
     """
-    Struttura dati standardizzata per rappresentare una Bounding Box 3D predetta.
-    Tutti i detector dei 3 progetti restituiranno istanze di questa classe.
+    Standardized data structure to represent a predicted 3D Bounding Box.
+    All detectors from the 3 projects will return instances of this class.
     """
     def __init__(
         self,
         obj_type: str,
-        dimensions_3d: np.ndarray, # [h, w, l] in metri
-        location_3d: np.ndarray,   # [x, y, z] nel sistema di riferimento fotocamera
-        rotation_y: float,         # Angolo Yaw in radianti [-pi, pi]
-        score: float = 1.0,        # Punteggio di confidenza [0.0 - 1.0]
-        bbox_2d: np.ndarray = None # [xmin, ymin, xmax, ymax] opzionale o proiettato
+        dimensions_3d: np.ndarray, # [h, w, l] in meters
+        location_3d: np.ndarray,   # [x, y, z] in camera reference frame
+        rotation_y: float,         # Yaw angle in radians [-pi, pi]
+        score: float = 1.0,        # Confidence score [0.0 - 1.0]
+        bbox_2d: np.ndarray = None # [xmin, ymin, xmax, ymax] optional or projected
     ):
         self.type = obj_type
         self.dimensions_3d = np.array(dimensions_3d, dtype=np.float32)

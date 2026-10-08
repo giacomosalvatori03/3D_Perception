@@ -6,19 +6,18 @@ from src.detection import Detection3D
 
 class Visualizer:
     """
-    Modulo di visualizzazione per proiettare Bounding Box 2D/3D sulle immagini RGB
-    e per generare viste dall'alto (Bird's Eye View - BEV) orientate sul piano X-Z.
+    Visualization module to project 2D/3D Bounding Boxes onto RGB images
+    and to generate oriented Bird's Eye View (BEV) on the X-Z plane.
     """
-
     BOX_EDGES = [
-        (0, 1), (1, 2), (2, 3), (3, 0),  # Base inferiore
-        (4, 5), (5, 6), (6, 7), (7, 4),  # Base superiore
-        (0, 4), (1, 5), (2, 6), (3, 7)   # Inserzioni verticali
+        (0, 1), (1, 2), (2, 3), (3, 0),  # Inferior base
+        (4, 5), (5, 6), (6, 7), (7, 4),  # Superior base
+        (0, 4), (1, 5), (2, 6), (3, 7)   # Vertical connections
     ]
 
     @staticmethod
     def project_rect_to_image(pts_rect: np.ndarray, P2: np.ndarray) -> np.ndarray:
-        """Proietta punti 3D nel sistema di riferimento fotocamera rettificato sui pixel 2D dell'immagine."""
+        """Project 3D points in the rectified camera reference frame to 2D image pixels."""
         pts_hom = np.hstack((pts_rect, np.ones((pts_rect.shape[0], 1))))
         pts_2d_hom = np.dot(pts_hom, P2.T)
         pts_2d = pts_2d_hom[:, :2] / pts_2d_hom[:, 2:3]
@@ -36,7 +35,7 @@ class Visualizer:
         thickness: int = 2,
         label: str = None
     ) -> np.ndarray:
-        """Disegna un cuboide 3D proiettato sull'immagine RGB."""
+        """Draw a 3D cuboid projected onto the RGB image."""
         img_out = image.copy()
         corners_3d = calib.get_3d_box_corners_cam(location_3d, dimensions_3d, rotation_y)
         
@@ -50,7 +49,7 @@ class Visualizer:
             pt2 = tuple(corners_2d[edge[1]])
             cv2.line(img_out, pt1, pt2, color, thickness, lineType=cv2.LINE_AA)
 
-        # Disegna 'X' sulla faccia anteriore
+        # Draw 'X' on the front face
         front_face_idx = [0, 1, 5, 4]
         pt_f0 = tuple(corners_2d[front_face_idx[0]])
         pt_f2 = tuple(corners_2d[front_face_idx[2]])
@@ -78,22 +77,22 @@ class Visualizer:
         label: str = None
     ):
         """
-        Disegna un rettangolo orientato (Oriented 2D Box) sul piano BEV (X-Z).
-        Aggiunge una linea vettoriale dal centro alla parte anteriore per mostrare l'orientamento.
+        Draw an oriented 2D box on the BEV (X-Z) plane.
+        Adds a directional line from the center to the front edge to indicate orientation.
         """
-        # Calcola gli 8 vertici 3D
+        # Calculate the 8 3D corners
         corners_3d = calib.get_3d_box_corners_cam(location_3d, dimensions_3d, rotation_y)
         
-        # Prendi i 4 vertici della base inferiore proiettati su (X, Z)
+        # Take the 4 corners of the bottom face projected onto (X, Z)
         bev_corners = corners_3d[:4, [0, 2]] # Shape (4, 2) -> (x, z)
         
-        # Chiudi il poligono collegando l'ultimo punto al primo
+        # Close the polygon by connecting the last point to the first
         bev_corners_closed = np.vstack([bev_corners, bev_corners[0]])
         
-        # Disegna il perimetro del rettangolo orientato
+        # Draw the perimeter of the oriented rectangle
         ax.plot(bev_corners_closed[:, 0], bev_corners_closed[:, 1], color=color, linewidth=linewidth, label=label)
         
-        # Calcola e disegna la linea direzionale (dal centro della box verso il fronte del veicolo)
+        # Calculate and draw the directional line (from the center of the box to the front edge)
         front_center = (bev_corners[0] + bev_corners[1]) / 2.0
         box_center = location_3d[[0, 2]]
         ax.plot([box_center[0], front_center[0]], [box_center[1], front_center[1]], color=color, linewidth=linewidth + 0.5)
@@ -106,17 +105,16 @@ class Visualizer:
         draw_gt: bool = True,
         figsize: tuple = (16, 7)
     ):
-        """
-        Visualizza affiancati:
-        1. Immagine RGB con Cuboidi 3D proiettati.
-        2. Vista BEV (Bird's Eye View) con Rettangoli 2D Orientati per GT e Predizioni.
+        """Visualize side-by-side:
+        1. RGB Image with projected 3D cuboids.
+        2. BEV (Bird's Eye View) with Oriented 2D Rectangles for GT and Predictions.
         """
         image = sample['image'].copy()
         calib = sample['calib']
         points = sample['points']
         gt_objects = sample['labels']
 
-        # 1. Proiezione su Immagine RGB (GT = Verde, Pred = Rosso)
+        # 1. Projection onto RGB Image (GT = Green, Pred = Red)
         if draw_gt and gt_objects:
             for obj in gt_objects:
                 image = cls.draw_box3d_on_image(
@@ -145,9 +143,9 @@ class Visualizer:
 
         fig, axes = plt.subplots(1, 2, figsize=figsize)
 
-        # Subplot 1: Immagine RGB
+        # Subplot 1: RGB Image with 3D Bounding Boxes
         axes[0].imshow(image)
-        axes[0].set_title(f"3D Bounding Boxes proiettate su Immagine - Frame {sample['sample_id']}")
+        axes[0].set_title(f"3D Bounding Boxes projected on RGB Image - Frame {sample['sample_id']}")
         axes[0].axis('off')
 
         # Subplot 2: Bird's Eye View (BEV)
@@ -155,10 +153,10 @@ class Visualizer:
         bev_mask = (pts_cam[:, 2] > 0) & (pts_cam[:, 2] < 60) & (np.abs(pts_cam[:, 0]) < 25)
         pts_bev = pts_cam[bev_mask]
 
-        # Punti LiDAR
+        # LiDAR points in BEV (X-Z plane)
         axes[1].scatter(pts_bev[:, 0], pts_bev[:, 2], c=pts_bev[:, 2], cmap='viridis', s=0.5, alpha=0.5)
 
-        # Disegna Bounding Box orientate GT in BEV (Verde)
+        # Draw Oriented GT Boxes in BEV (Green)
         if draw_gt and gt_objects:
             for i, obj in enumerate(gt_objects):
                 label = 'Ground Truth' if i == 0 else None
@@ -173,7 +171,7 @@ class Visualizer:
                     label=label
                 )
 
-        # Disegna Bounding Box orientate Predette in BEV (Rosso)
+        # Draw Oriented Prediction Boxes in BEV (Red)
         if predictions:
             for i, pred in enumerate(predictions):
                 label = 'Prediction' if i == 0 else None
@@ -190,9 +188,9 @@ class Visualizer:
 
         axes[1].set_xlim(-25, 25)
         axes[1].set_ylim(0, 60)
-        axes[1].set_xlabel("X (Laterale, metri)")
-        axes[1].set_ylabel("Z (Profondità, metri)")
-        axes[1].set_title("Bird's Eye View (BEV) - Rettangoli Orientati 2D")
+        axes[1].set_xlabel("X (Lateral, meters)")
+        axes[1].set_ylabel("Z (Depth, meters)")
+        axes[1].set_title("Bird's Eye View (BEV) - Oriented 2D Rectangles")
         axes[1].grid(True, linestyle='--', alpha=0.5)
         axes[1].legend(loc='upper right')
 
