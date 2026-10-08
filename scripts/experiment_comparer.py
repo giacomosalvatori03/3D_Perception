@@ -91,7 +91,7 @@ class ExperimentComparer:
         """
         df = self.load_all_results()
         if df.empty:
-            print("⚠️ No experiment results found.")
+            print(" No experiment results found.")
             return None
 
         df_cls = df[df["Class"] == target_class]
@@ -124,7 +124,7 @@ class ExperimentComparer:
         """Plots line charts showing mAP40 degradation across ordered experiment configurations."""
         df = self.load_all_results()
         if df.empty:
-            print("⚠️ No experiment results found.")
+            print(" No experiment results found.")
             return
 
         if exp_order is None:
@@ -170,7 +170,7 @@ class ExperimentComparer:
         """Plots a grouped bar chart comparing mAP40 across classes preserving the specified experiment order."""
         df = self.load_all_results()
         if df.empty:
-            print("⚠️ No experiment results found.")
+            print(" No experiment results found.")
             return
 
         if exp_names is None:
@@ -209,6 +209,6 @@ class ExperimentComparer:
 
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches="tight")
-            print(f"✅ Bar chart saved to: {save_path}")
+            print(f" Bar chart saved to: {save_path}")
 
         plt.show()
