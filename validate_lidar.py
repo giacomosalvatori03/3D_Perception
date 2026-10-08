@@ -109,7 +109,7 @@ def parse_args():
         choices=["none", "random", "beam"],
     )
     parser.add_argument("--subsample_ratio", type=float, default=1.0)
-    parser.add_argument("--num_beams", type=int, default=32)
+    parser.add_argument("--num_beams", type=int, default=64)
     parser.add_argument("--max_samples", type=int, default=-1)
     parser.add_argument("--conf_thresh", type=float, default=0.3)
     return parser.parse_args()

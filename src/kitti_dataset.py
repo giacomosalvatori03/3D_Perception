@@ -1,88 +1,92 @@
 import os
 import numpy as np
 from torch.utils.data import Dataset
-from .calibration import Calibration
-from .detection import Detection3D
+from src.calibration import Calibration
 from scripts.sparsifier import LidarSparsifier
 
+
 class KittiDataset(Dataset):
+    """KITTI Dataset loader with built-in LiDAR sparsification support."""
+
     def __init__(
         self,
         data_root: str,
-        subsample_mode: str = 'none',      # 'none', 'random', 'beam', 'distance'
-        subsample_ratio: float = 1.0,      # Used for mode='random' (es. 0.5, 0.25, 0.1)
-        num_beams: int = 32               # Used for mode='beam' (es. 32, 16)
+        subsample_mode: str = "none",
+        subsample_ratio: float = 1.0,
+        num_beams: int = 64,
     ):
         self.data_root = data_root
         self.subsample_mode = subsample_mode
         self.subsample_ratio = subsample_ratio
         self.num_beams = num_beams
 
-        self.pts_path = os.path.join(data_root, 'velodyne_reduced')
-        self.calib_path = os.path.join(data_root, 'calib')
-        self.label_path = os.path.join(data_root, 'label_2')
-        self.image_path = os.path.join(data_root, 'image_2')
+        self.velo_dir = os.path.join(data_root, "velodyne")
+        self.calib_dir = os.path.join(data_root, "calib")
+        self.label_dir = os.path.join(data_root, "label_2")
 
-        self.sample_ids = sorted([
-            os.path.splitext(f)[0] for f in os.listdir(self.pts_path) if f.endswith('.bin')
-        ])
+        if os.path.exists(self.velo_dir):
+            self.sample_ids = sorted([
+                os.path.splitext(f)[0]
+                for f in os.listdir(self.velo_dir)
+                if f.endswith(".bin")
+            ])
+        else:
+            self.sample_ids = []
 
     def __len__(self):
         return len(self.sample_ids)
 
     def __getitem__(self, idx: int) -> dict:
         sample_id = self.sample_ids[idx]
-        
-        # 1. Load LiDAR points (.bin)
-        bin_file = os.path.join(self.pts_path, f"{sample_id}.bin")
-        points = np.fromfile(bin_file, dtype=np.float32).reshape(-1, 4)
 
-        # 2. Apply sparsification if enabled
-        if self.subsample_mode != 'none':
-            points = LidarSparsifier.sparsify(
-                points,
-                mode=self.subsample_mode,
-                ratio=self.subsample_ratio,
-                num_beams=self.num_beams,
-            )
+        # Load LiDAR point cloud (.bin)
+        velo_path = os.path.join(self.velo_dir, f"{sample_id}.bin")
+        points = np.fromfile(velo_path, dtype=np.float32).reshape(-1, 4)
 
-        # 3. Load Calibration and Ground Truth
-        calib = Calibration(os.path.join(self.calib_path, f"{sample_id}.txt"))
-        gt_boxes = self._parse_label(os.path.join(self.label_path, f"{sample_id}.txt"))
-        
-        img_path = os.path.join(self.image_path, f"{sample_id}.png")
+        # Apply LiDAR subsampling (defaults to returning original cloud)
+        points = LidarSparsifier.sparsify(
+            points,
+            mode=self.subsample_mode,
+            target_beams=self.num_beams,
+            keep_ratio=self.subsample_ratio,
+        )
+
+        # Load Calibration
+        calib_path = os.path.join(self.calib_dir, f"{sample_id}.txt")
+        calib = Calibration(calib_path)
+
+        # Load Ground Truth boxes if present
+        gt_boxes = []
+        label_path = os.path.join(self.label_dir, f"{sample_id}.txt")
+        if os.path.exists(label_path):
+            with open(label_path, "r") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if not parts or parts[0] == "DontCare":
+                        continue
+                    obj_type = parts[0]
+                    trunc = float(parts[1])
+                    occ = int(parts[2])
+                    alpha = float(parts[3])
+                    bbox_2d = [float(x) for x in parts[4:8]]
+                    dims = [float(x) for x in parts[8:11]]  # h, w, l
+                    loc = [float(x) for x in parts[11:14]]  # x, y, z
+                    ry = float(parts[14])
+
+                    gt_boxes.append({
+                        "type": obj_type,
+                        "truncation": trunc,
+                        "occlusion": occ,
+                        "alpha": alpha,
+                        "bbox_2d": bbox_2d,
+                        "dimensions_3d": dims,
+                        "location_3d": loc,
+                        "rotation_y": ry,
+                    })
 
         return {
-            'sample_id': sample_id,
-            'points': points,
-            'calib': calib,
-            'gt_boxes': gt_boxes,
-            'image_path': img_path if os.path.exists(img_path) else None
+            "sample_id": sample_id,
+            "points": points,
+            "calib": calib,
+            "gt_boxes": gt_boxes,
         }
-
-    def _parse_label(self, label_path):
-        """
-        Parse the Ground Truth annotation txt file in KITTI format.
-        """
-        objects = []
-        if not os.path.exists(label_path):
-            return objects
-
-        with open(label_path, 'r') as f:
-            for line in f.readlines():
-                data = line.strip().split()
-                if not data or data[0] == 'DontCare':
-                    continue
-
-                obj = {
-                    'type': data[0],                               # Class (Car, Pedestrian, Cyclist, ecc.)
-                    'truncation': float(data[1]),                  # Truncation [0..1]
-                    'occlusion': int(data[2]),                     # Occlusion (0, 1, 2, 3)
-                    'alpha': float(data[3]),                       # Observation angle [-pi..pi]
-                    'bbox_2d': np.array([float(x) for x in data[4:8]], dtype=np.float32),   # [left, top, right, bottom]
-                    'dimensions_3d': np.array([float(x) for x in data[8:11]], dtype=np.float32),  # [h, w, l]
-                    'location_3d': np.array([float(x) for x in data[11:14]], dtype=np.float32),  # [x, y, z] camera frame
-                    'rotation_y': float(data[14])                  # Rotazione Y [-pi..pi]
-                }
-                objects.append(obj)
-        return objects

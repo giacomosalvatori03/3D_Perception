@@ -14,7 +14,7 @@ class LidarSparsifier:
     def reduce_beams(
         points: np.ndarray,
         original_beams: int = 64,
-        target_beams: int = 32,
+        target_beams: int = 64,
     ) -> np.ndarray:
         """Simulates vertical beam reduction (e.g., 64-ring to 32 or 16 rings)
 
@@ -52,21 +52,24 @@ class LidarSparsifier:
         indices = np.random.choice(num_points, size=num_keep, replace=False)
         return points[indices]
 
-    def apply_subsampling(
-        self,
+    @staticmethod
+    def sparsify(
         points: np.ndarray,
         mode: str = "none",
-        target_beams: int = 32,
-        keep_ratio: float = 0.5,
+        target_beams: int = 64,
+        keep_ratio: float = 1.0,
     ) -> np.ndarray:
-        """Applies the selected subsampling strategy to the input point cloud."""
-        if mode == "beam_reduction":
-            return self.reduce_beams(
+        """Applies the selected subsampling strategy to the input point cloud.
+
+        Defaults to mode='none', target_beams=64, keep_ratio=1.0 (no subsampling).
+        """
+        if mode in ["beam", "beam_reduction"]:
+            return LidarSparsifier.reduce_beams(
                 points, original_beams=64, target_beams=target_beams
             )
-        elif mode == "random_drop":
-            return self.random_drop(points, keep_ratio=keep_ratio)
-        elif mode == "none":
+        elif mode in ["random", "random_drop"]:
+            return LidarSparsifier.random_drop(points, keep_ratio=keep_ratio)
+        elif mode in ["none", None]:
             return points
         else:
             raise ValueError(f"Unknown subsampling mode: {mode}")
