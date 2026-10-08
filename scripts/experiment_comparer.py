@@ -1,6 +1,7 @@
 import glob
 import json
 import os
+import re
 from typing import Dict, List, Optional
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -25,6 +26,29 @@ class ExperimentComparer:
     ):
         self.experiments_root = experiments_root
 
+    @staticmethod
+    def _sort_experiment_names(exp_names: List[str]) -> List[str]:
+        """Helper method to logically sort experiment tags.
+
+        Puts 'baseline' first, then orders by decreasing numeric parameters
+        (e.g., beam_32rings -> beam_16rings, or random_100perc ->
+        random_50perc).
+        """
+
+        def extract_sort_key(name: str):
+            name_lower = name.lower()
+            if "baseline" in name_lower:
+                return (0, 0)
+
+            # Extract integer values (e.g., 32 from beam_32rings, 50 from random_50perc)
+            numbers = re.findall(r"\d+", name)
+            num_val = int(numbers[0]) if numbers else 0
+
+            # Sort by decreasing magnitude (higher beam count or keep_ratio first)
+            return (1, -num_val)
+
+        return sorted(exp_names, key=extract_sort_key)
+
     def load_all_results(self) -> pd.DataFrame:
         """Searches all subfolders in the experiments directory for
 
@@ -37,7 +61,7 @@ class ExperimentComparer:
         )
 
         records = []
-        for jpath in sorted(json_files):
+        for jpath in json_files:
             exp_dir = os.path.dirname(jpath)
             exp_name = os.path.basename(os.path.normpath(exp_dir))
 
@@ -57,7 +81,9 @@ class ExperimentComparer:
         return df
 
     def get_summary_table(
-        self, target_class: str = "Car"
+        self,
+        target_class: str = "Car",
+        exp_order: Optional[List[str]] = None,
     ) -> Optional[pd.DataFrame]:
         """Generates a summary DataFrame comparing Easy, Moderate, and Hard mAP40
 
@@ -65,7 +91,7 @@ class ExperimentComparer:
         """
         df = self.load_all_results()
         if df.empty:
-            print(" No experiment results found.")
+            print("⚠️ No experiment results found.")
             return None
 
         df_cls = df[df["Class"] == target_class]
@@ -73,16 +99,24 @@ class ExperimentComparer:
             index="Experiment", columns="Difficulty", values="mAP40"
         )
 
-        # Reorder columns
+        # Reorder columns by difficulty
         cols = [
             c for c in ["Easy", "Moderate", "Hard"] if c in pivot_df.columns
         ]
         pivot_df = pivot_df[cols]
+
+        # Apply custom or logical automatic ordering to index rows
+        if exp_order:
+            ordered_index = [e for e in exp_order if e in pivot_df.index]
+        else:
+            ordered_index = self._sort_experiment_names(list(pivot_df.index))
+
+        pivot_df = pivot_df.reindex(ordered_index)
         return pivot_df
 
     def plot_degradation_curves(
         self,
-        exp_order: List[str],
+        exp_order: Optional[List[str]] = None,
         target_class: str = "Car",
         title: str = "mAP40 Performance Degradation",
         save_path: Optional[str] = None,
@@ -90,15 +124,19 @@ class ExperimentComparer:
         """Plots line charts showing mAP40 degradation across ordered experiment configurations."""
         df = self.load_all_results()
         if df.empty:
-            print(" No experiment results found.")
+            print("⚠️ No experiment results found.")
             return
+
+        if exp_order is None:
+            exp_order = self._sort_experiment_names(
+                list(df["Experiment"].unique())
+            )
 
         df_cls = df[df["Class"] == target_class]
 
         plt.figure(figsize=(9, 5))
         for diff in ["Easy", "Moderate", "Hard"]:
             subset = df_cls[df_cls["Difficulty"] == diff]
-            # Map values according to ordered list
             subset = subset.set_index("Experiment").reindex(exp_order).dropna()
 
             plt.plot(
@@ -119,20 +157,28 @@ class ExperimentComparer:
 
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches="tight")
-            print(f" Plot saved to: {save_path}")
+            print(f"✅ Line plot saved to: {save_path}")
 
         plt.show()
 
     def compare_all_classes_bar_plot(
         self,
-        exp_names: List[str],
+        exp_names: Optional[List[str]] = None,
         difficulty: str = "Moderate",
         save_path: Optional[str] = None,
     ):
-        """Plots a grouped bar chart comparing Moderate mAP40 across classes for selected experiments."""
+        """Plots a grouped bar chart comparing mAP40 across classes preserving the specified experiment order."""
         df = self.load_all_results()
         if df.empty:
+            print("⚠️ No experiment results found.")
             return
+
+        if exp_names is None:
+            exp_names = self._sort_experiment_names(
+                list(df["Experiment"].unique())
+            )
+        else:
+            exp_names = [e for e in exp_names if e in df["Experiment"].values]
 
         filtered_df = df[
             (df["Experiment"].isin(exp_names))
@@ -142,6 +188,12 @@ class ExperimentComparer:
         pivot_df = filtered_df.pivot(
             index="Experiment", columns="Class", values="mAP40"
         )
+
+        # Enforce exact experiment sequence order on x-axis
+        pivot_df = pivot_df.reindex(
+            [e for e in exp_names if e in pivot_df.index]
+        )
+
         ax = pivot_df.plot(kind="bar", figsize=(10, 5), width=0.8)
 
         plt.title(
@@ -157,6 +209,6 @@ class ExperimentComparer:
 
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches="tight")
-            print(f" Bar chart saved to: {save_path}")
+            print(f"✅ Bar chart saved to: {save_path}")
 
         plt.show()
