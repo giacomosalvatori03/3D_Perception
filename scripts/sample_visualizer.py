@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from src.detection import Detection3D
-from src.evaluator import KittiEvaluator
 from src.kitti_dataset import KittiDataset
 from src.visualizer import Visualizer
+from scripts.lidar_evaluator import KittiEvaluator
 
 
 class SampleVisualizer:
