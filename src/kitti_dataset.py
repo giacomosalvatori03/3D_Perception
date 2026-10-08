@@ -20,7 +20,7 @@ class KittiDataset(Dataset):
         self.subsample_ratio = subsample_ratio
         self.num_beams = num_beams
 
-        self.velo_dir = os.path.join(data_root, "velodyne")
+        self.velo_dir = os.path.join(data_root, "velodyne_reduced")
         self.calib_dir = os.path.join(data_root, "calib")
         self.label_dir = os.path.join(data_root, "label_2")
 
