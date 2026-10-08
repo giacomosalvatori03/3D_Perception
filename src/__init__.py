@@ -1,12 +1,15 @@
 # src/__init__.py
-from src.kitti_dataset import KittiDataset
 from src.calibration import Calibration
 from src.detection import Detection3D
-from src.detectors import BaseDetector, LidarDetector
+from src.kitti_dataset import KittiDataset
 from src.visualizer import Visualizer
-from scripts.sparsifier import LidarSparsifier
-from scripts.lidar_evaluator import KittiEvaluator
-from scripts.sample_visualizer import SampleVisualizer
+
+# Safe optional import for detectors requiring mmdet3d and CUDA dependencies
+try:
+    from src.detectors import BaseDetector, LidarDetector
+except (ImportError, ModuleNotFoundError):
+    BaseDetector = None
+    LidarDetector = None
 
 __all__ = [
     'KittiDataset',
@@ -19,3 +22,4 @@ __all__ = [
     'KittiEvaluator',
     'SampleVisualizer'
 ]
+
