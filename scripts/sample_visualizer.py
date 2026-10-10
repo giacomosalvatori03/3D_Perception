@@ -1,19 +1,22 @@
 import glob
 import os
+import re
 import cv2
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
+from scripts.lidar_evaluator import KittiEvaluator
 from src.detection import Detection3D
 from src.kitti_dataset import KittiDataset
+from src.sparsifier import LidarSparsifier
 from src.visualizer import Visualizer
-from scripts.lidar_evaluator import KittiEvaluator
 
 
 class SampleVisualizer:
     """Utility class to identify complex KITTI frames and visualize GT vs Predictions
 
-    in a compact grid format directly inside Jupyter/Colab notebooks.
+    in a compact grid format, correctly applying the experiment's LiDAR
+    subsampling to the rendered point cloud.
     """
 
     def __init__(
@@ -57,6 +60,24 @@ class SampleVisualizer:
 
         return detections
 
+    @staticmethod
+    def parse_subsampling_from_exp_dir(exp_dir: str):
+        """Extracts subsampling mode and parameters from experiment directory name."""
+        exp_name = os.path.basename(os.path.normpath(exp_dir)).lower()
+
+        if "random" in exp_name:
+            match = re.search(r"(\d+)", exp_name)
+            if match:
+                perc = float(match.group(1))
+                return "random", perc / 100.0, 64
+        elif "beam" in exp_name:
+            match = re.search(r"(\d+)", exp_name)
+            if match:
+                beams = int(match.group(1))
+                return "beam", 1.0, beams
+
+        return "none", 1.0, 64
+
     def find_interesting_samples(
         self, gt_dir: str, num_samples: int = 3
     ) -> list:
@@ -73,7 +94,6 @@ class SampleVisualizer:
             names = list(anno["name"])
             locs = anno["location"]
 
-            # Scene interest metrics
             unique_classes = set(names) - {"DontCare", "Van", "Person_sitting"}
             num_classes = len(unique_classes)
             total_objects = len(
@@ -83,7 +103,6 @@ class SampleVisualizer:
                 sum(1 for loc in locs if loc[2] > 30.0) if len(locs) > 0 else 0
             )
 
-            # Combined complexity score
             score = (num_classes * 10) + total_objects + (far_objects * 2)
 
             sample_scores.append({
@@ -139,10 +158,12 @@ class SampleVisualizer:
                 )
 
         ax_img.imshow(image)
-        ax_img.set_title(f"Frame #{sample['sample_id']} - 3D Camera Projection", fontsize=10)
+        ax_img.set_title(
+            f"Frame #{sample['sample_id']} - 3D Camera Projection", fontsize=10
+        )
         ax_img.axis("off")
 
-        # 2. Render BEV point cloud and oriented 2D boxes
+        # 2. Render BEV point cloud (subsampled) and oriented 2D boxes
         pts_cam = calib.velo2cam(points)
         bev_mask = (
             (pts_cam[:, 2] > 0)
@@ -192,7 +213,10 @@ class SampleVisualizer:
         ax_bev.set_ylim(0, 60)
         ax_bev.set_xlabel("X (m)", fontsize=9)
         ax_bev.set_ylabel("Z (m)", fontsize=9)
-        ax_bev.set_title(f"Frame #{sample['sample_id']} - BEV View", fontsize=10)
+        ax_bev.set_title(
+            f"Frame #{sample['sample_id']} - BEV View ({len(points)} pts)",
+            fontsize=10,
+        )
         ax_bev.grid(True, linestyle=":", alpha=0.5)
         ax_bev.legend(loc="upper right", fontsize=8)
 
@@ -202,9 +226,9 @@ class SampleVisualizer:
         num_samples: int = 3,
         conf_thresh: float = 0.3,
         save_plots: bool = True,
-        grid_layout: bool = True
+        grid_layout: bool = True,
     ):
-        """Visualizes top complex frames in a compact grid format and saves non-empty images to Drive."""
+        """Visualizes top complex frames in a compact grid format applying matching point cloud sparsification."""
         pred_dir = os.path.join(exp_dir, "pred_labels")
         gt_dir = os.path.join(exp_dir, "gt_labels")
         save_vis_dir = os.path.join(exp_dir, "visualizations")
@@ -216,13 +240,17 @@ class SampleVisualizer:
             gt_dir, num_samples=num_samples
         )
         if not top_samples:
-            print(" No valid Ground Truth samples found for visualization.")
+            print("⚠️ No valid Ground Truth samples found for visualization.")
             return
+
+        # Extract subsampling settings corresponding to this experiment
+        sub_mode, sub_ratio, target_beams = self.parse_subsampling_from_exp_dir(
+            exp_dir
+        )
 
         n_samples = len(top_samples)
 
         if grid_layout:
-            # Compact multi-row grid layout (1 row per frame)
             fig, axes = plt.subplots(
                 n_samples, 2, figsize=(13, 3.8 * n_samples)
             )
@@ -233,10 +261,20 @@ class SampleVisualizer:
                 sid = info["sample_id"]
                 idx = self._resolve_sample_index(sid)
 
-                sample = self.dataset[idx]
+                sample = self.dataset[idx].copy()
                 sample["sample_id"] = sid
-                sample["labels"] = sample.get("gt_boxes", sample.get("labels", []))
+                sample["labels"] = sample.get(
+                    "gt_boxes", sample.get("labels", [])
+                )
                 self._ensure_image_key(sample, sid)
+
+                # Apply experiment-specific LiDAR sparsification to rendering points
+                sample["points"] = LidarSparsifier.sparsify(
+                    sample["points"],
+                    mode=sub_mode,
+                    target_beams=target_beams,
+                    keep_ratio=sub_ratio,
+                )
 
                 pred_txt_path = os.path.join(pred_dir, f"{sid}.txt")
                 predictions = self.load_predictions_as_detections(
@@ -253,11 +291,12 @@ class SampleVisualizer:
 
             plt.tight_layout()
 
-            # CRITICAL FIX: Save figure BEFORE calling plt.show()
             if save_plots:
-                grid_out_path = os.path.join(save_vis_dir, "summary_grid_bev.png")
+                grid_out_path = os.path.join(
+                    save_vis_dir, "summary_grid_bev.png"
+                )
                 plt.savefig(grid_out_path, bbox_inches="tight", dpi=150)
-                print(f" Saved compact grid visualization to Drive: {grid_out_path}")
+                print(f"✅ Saved compact grid visualization to Drive: {grid_out_path}")
 
             plt.show()
             plt.close(fig)
