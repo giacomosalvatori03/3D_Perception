@@ -76,17 +76,21 @@ class Visualizer:
         linewidth=1.5,
         label=None,
     ):
-        """Draws a 2D oriented bounding box in Bird's Eye View (BEV) with a directional line."""
-        # Assicura che gli input siano array NumPy
+        """Draws a 2D oriented bounding box in Bird's Eye View (BEV) aligned with KITTI camera frame standards.
+
+        In KITTI camera coordinates:
+        - Object length (l) aligns with X-axis when rotation_y = 0.
+        - Object width (w) aligns with Z-axis when rotation_y = 0.
+        """
         location_3d = np.asarray(location_3d)
         dimensions_3d = np.asarray(dimensions_3d)
 
         h, w, l = dimensions_3d
         x, y, z = location_3d
 
-        # Calcolo dei 4 angoli nel piano BEV (XZ)
-        x_corners = [w / 2, w / 2, -w / 2, -w / 2]
-        z_corners = [l / 2, -l / 2, -l / 2, l / 2]
+        # Correct KITTI camera frame alignment: length (l) on X, width (w) on Z
+        x_corners = [l / 2, l / 2, -l / 2, -l / 2]
+        z_corners = [w / 2, -w / 2, -w / 2, w / 2]
 
         R = np.array(
             [
@@ -100,20 +104,22 @@ class Visualizer:
         corners[0, :] += x
         corners[1, :] += z
 
-        # Chiude il poligono collegando l'ultimo punto al primo
+        # Close polygon loop
         corners_x = np.append(corners[0, :], corners[0, 0])
         corners_z = np.append(corners[1, :], corners[1, 0])
 
-        ax.plot(corners_x, corners_z, color=color, linewidth=linewidth, label=label)
+        ax.plot(
+            corners_x, corners_z, color=color, linewidth=linewidth, label=label
+        )
 
-        # Direzione del fronte del box
+        # Heading vector pointing towards the front of the object
         front_center = np.array(
             [
-                x + (l / 2) * np.sin(rotation_y),
-                z + (l / 2) * np.cos(rotation_y),
+                x + (l / 2) * np.cos(rotation_y),
+                z - (l / 2) * np.sin(rotation_y),
             ]
         )
-        box_center = location_3d[[0, 2]]
+        box_center = np.array([x, z])
 
         ax.plot(
             [box_center[0], front_center[0]],

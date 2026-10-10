@@ -240,7 +240,7 @@ class SampleVisualizer:
             gt_dir, num_samples=num_samples
         )
         if not top_samples:
-            print("⚠️ No valid Ground Truth samples found for visualization.")
+            print(" No valid Ground Truth samples found for visualization.")
             return
 
         # Extract subsampling settings corresponding to this experiment
@@ -296,7 +296,7 @@ class SampleVisualizer:
                     save_vis_dir, "summary_grid_bev.png"
                 )
                 plt.savefig(grid_out_path, bbox_inches="tight", dpi=150)
-                print(f"✅ Saved compact grid visualization to Drive: {grid_out_path}")
+                print(f" Saved compact grid visualization to Drive: {grid_out_path}")
 
             plt.show()
             plt.close(fig)
