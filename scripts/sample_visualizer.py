@@ -8,7 +8,7 @@ import numpy as np
 from scripts.lidar_evaluator import KittiEvaluator
 from src.detection import Detection3D
 from src.kitti_dataset import KittiDataset
-from src.sparsifier import LidarSparsifier
+from scripts.sparsifier import LidarSparsifier
 from src.visualizer import Visualizer
 
 
