@@ -68,34 +68,59 @@ class Visualizer:
     def draw_bev_box(
         cls,
         ax,
-        location_3d: np.ndarray,
-        dimensions_3d: np.ndarray,
-        rotation_y: float,
+        location_3d,
+        dimensions_3d,
+        rotation_y,
         calib,
-        color: str = 'g',
-        linewidth: float = 1.5,
-        label: str = None
+        color="g",
+        linewidth=1.5,
+        label=None,
     ):
-        """
-        Draw an oriented 2D box on the BEV (X-Z) plane.
-        Adds a directional line from the center to the front edge to indicate orientation.
-        """
-        # Calculate the 8 3D corners
-        corners_3d = calib.get_3d_box_corners_cam(location_3d, dimensions_3d, rotation_y)
-        
-        # Take the 4 corners of the bottom face projected onto (X, Z)
-        bev_corners = corners_3d[:4, [0, 2]] # Shape (4, 2) -> (x, z)
-        
-        # Close the polygon by connecting the last point to the first
-        bev_corners_closed = np.vstack([bev_corners, bev_corners[0]])
-        
-        # Draw the perimeter of the oriented rectangle
-        ax.plot(bev_corners_closed[:, 0], bev_corners_closed[:, 1], color=color, linewidth=linewidth, label=label)
-        
-        # Calculate and draw the directional line (from the center of the box to the front edge)
-        front_center = (bev_corners[0] + bev_corners[1]) / 2.0
+        """Draws a 2D oriented bounding box in Bird's Eye View (BEV) with a directional line."""
+        # Assicura che gli input siano array NumPy
+        location_3d = np.asarray(location_3d)
+        dimensions_3d = np.asarray(dimensions_3d)
+
+        h, w, l = dimensions_3d
+        x, y, z = location_3d
+
+        # Calcolo dei 4 angoli nel piano BEV (XZ)
+        x_corners = [w / 2, w / 2, -w / 2, -w / 2]
+        z_corners = [l / 2, -l / 2, -l / 2, l / 2]
+
+        R = np.array(
+            [
+                [np.cos(rotation_y), np.sin(rotation_y)],
+                [-np.sin(rotation_y), np.cos(rotation_y)],
+            ]
+        )
+
+        corners = np.vstack([x_corners, z_corners])
+        corners = np.dot(R, corners)
+        corners[0, :] += x
+        corners[1, :] += z
+
+        # Chiude il poligono collegando l'ultimo punto al primo
+        corners_x = np.append(corners[0, :], corners[0, 0])
+        corners_z = np.append(corners[1, :], corners[1, 0])
+
+        ax.plot(corners_x, corners_z, color=color, linewidth=linewidth, label=label)
+
+        # Direzione del fronte del box
+        front_center = np.array(
+            [
+                x + (l / 2) * np.sin(rotation_y),
+                z + (l / 2) * np.cos(rotation_y),
+            ]
+        )
         box_center = location_3d[[0, 2]]
-        ax.plot([box_center[0], front_center[0]], [box_center[1], front_center[1]], color=color, linewidth=linewidth + 0.5)
+
+        ax.plot(
+            [box_center[0], front_center[0]],
+            [box_center[1], front_center[1]],
+            color=color,
+            linewidth=linewidth + 0.5,
+        )
 
     @classmethod
     def visualize_scene(
