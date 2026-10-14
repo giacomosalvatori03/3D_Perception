@@ -6,12 +6,18 @@ from ultralytics import YOLO
 class CameraDetector:
     """2D Object Detector wrapper using KITTI fine-tuned YOLOv8 from HuggingFace."""
 
-    # Strictly target classes evaluated in the KITTI 3D Benchmark
-    EVAL_TARGET_CLASSES = {"Car", "Pedestrian", "Cyclist"}
+    # Explicit mapping from 2D KITTI classes to the 3 target 3D evaluation classes
+    CLASS_MAPPING = {
+        "Car": "Car",
+        "Van": "Car",  # Van mapped to Car (standard KITTI convention)
+        "Pedestrian": "Pedestrian",
+        "Person_sitting": "Pedestrian",  # Person_sitting mapped to Pedestrian
+        "Cyclist": "Cyclist",
+    }
 
     def __init__(
         self,
-        repo_id: str = "keremberke/yolov8s-kitti",
+        repo_id: str = "dronefreak/kitti-yolov8m",
         filename: str = "model.pt",
         conf_thresh: float = 0.25,
         device: str = "cuda",
@@ -28,12 +34,15 @@ class CameraDetector:
 
         # Retrieve dictionary of class names directly from model metadata
         self.class_names = self.model.names
-        print(f" Loaded KITTI 2D Detector. Registered classes: {self.class_names}")
+        print(
+            f" Loaded KITTI 2D Detector. Registered classes: {self.class_names}"
+        )
 
     def detect(self, image_path: str) -> list[dict]:
-        """
-        Runs 2D object detection on an RGB image and returns predictions 
-        filtered strictly to the 3 target evaluation classes (Car, Pedestrian,Cyclist).
+        """Runs 2D object detection on an RGB image and returns predictions
+
+        mapped strictly to the 3 target evaluation classes (Car, Pedestrian,
+        Cyclist).
         """
         results = self.model.predict(
             source=image_path,
@@ -51,20 +60,18 @@ class CameraDetector:
         for box in boxes:
             cls_id = int(box.cls[0].cpu().numpy())
             score = float(box.conf[0].cpu().numpy())
-            class_name = self.class_names.get(cls_id, "Unknown")
+            raw_class_name = self.class_names.get(cls_id, "Unknown")
 
-            # Optional mapping: Van -> Car (common in KITTI evaluation pipeline)
-            if class_name == "Van":
-                class_name = "Car"
+            # Map class name using dictionary; returns None if class is not target (e.g. Tram, Truck, Misc)
+            target_class = self.CLASS_MAPPING.get(raw_class_name)
 
-            # Filter strictly for the 3 target classes
-            if class_name in self.EVAL_TARGET_CLASSES:
+            if target_class is not None:
                 xyxy = box.xyxy[0].cpu().numpy().tolist()  # [x1, y1, x2, y2]
 
                 detections_2d.append({
                     "bbox_2d": xyxy,
                     "score": score,
-                    "type": class_name,
+                    "type": target_class,
                 })
 
         return detections_2d
