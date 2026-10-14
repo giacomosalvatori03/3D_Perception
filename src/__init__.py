@@ -6,10 +6,11 @@ from src.visualizer import Visualizer
 
 # Safe optional import for detectors requiring mmdet3d and CUDA dependencies
 try:
-    from src.detectors import BaseDetector, LidarDetector
+    from src.detectors import BaseDetector, LidarDetector, CameraDetector
 except (ImportError, ModuleNotFoundError):
     BaseDetector = None
     LidarDetector = None
+    CameraDetector = None
 
 __all__ = [
     'KittiDataset',
@@ -20,6 +21,7 @@ __all__ = [
     'LidarSparsifier',
     'Visualizer',
     'KittiEvaluator',
-    'SampleVisualizer'
+    'SampleVisualizer',
+    'CameraDetector'
 ]
 

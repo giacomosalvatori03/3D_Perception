@@ -58,7 +58,7 @@ This repository evaluates how gracefully an off-the-shelf, pre-trained **PointPi
 |       ├── base_detector.py        # Base class for the 3D detectors
 |       └── lidar_detector.py       # 3D object detection based on PointPillars
 ├── validate_lidar.py               # Inference on the validation dataset with sparsification  
-├── paper_1.tex                     # IEEE 2-column format conference paper draft
+├── paper_1.pdf                    # IEEE 2-column format conference paper draft
 └── README.md                       # Project documentation
 ```
 
