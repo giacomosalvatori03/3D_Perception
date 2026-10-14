@@ -18,7 +18,7 @@ class CameraDetector:
     def __init__(
         self,
         repo_id: str = "dronefreak/kitti-yolov8m",
-        filename: str = "model.pt",
+        filename: str = "best.pt",
         conf_thresh: float = 0.25,
         device: str = "cuda",
     ):
