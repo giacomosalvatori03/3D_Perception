@@ -5,7 +5,7 @@
 ![PyTorch 2.0.1](https://img.shields.io/badge/PyTorch-2.0.1-orange.svg)
 ![torchvision 0.15.2](https://img.shields.io/badge/torchvision-0.15.2-red.svg)
 ![NumPy < 2](https://img.shields.io/badge/NumPy-%3C2.0-013243.svg)
-![MMDetection3D](https://img.shields.io/badge/MMDetection3D-v1.1.0-blueviolet.svg)
+![OpenMMLab](https://img.shields.io/badge/MMDetection3D-0.17.1-blueviolet.svg)
 ![Google Drive](https://img.shields.io/badge/Storage-Google%20Drive-4285F4.svg)
 ![Google Colab](https://img.shields.io/badge/Platform-Google%20Colab%20GPU-yellow.svg)
 
@@ -99,10 +99,7 @@ This project was executed on a **Google Colab GPU** instance for high-performanc
 ### Dataset Requirements & Setup
 This project uses the **KITTI 3D Object Detection Validation Set** with the reduced point cloud configuration (`velodyne_reduced`).
 
-The dataset is stored on **Google Drive** and mounted into the execution environment. You can automatically download, extract, and structure the dataset by running the provided setup notebook:
-
-* **Notebook**: `notebooks/00_dataset_setup.ipynb`
-* **Function**: Mounts Google Drive, downloads the `velodyne_reduced` KITTI validation set, and sets up directory paths.
+The dataset is stored on **Google Drive** and mounted into the execution environment. You can automatically download, extract, and structure the dataset by running the provided setup notebook `notebooks/00_dataset_setup.ipynb`
 
 ### Environment Setup (Local / Miniconda / Colab)
 If setting up a local environment using **Miniconda** or preparing a fresh Colab session follow the first cell of `notebooks/01_lidar_degradation.ipynb`
