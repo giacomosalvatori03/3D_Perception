@@ -76,7 +76,7 @@ class CameraValidator:
 
         for i in tqdm(range(total_samples), desc="Processing 2D Frames"):
             sample = self.dataset[i]
-            img_path = sample["image_path"]
+            img_path = sample["sample_id"]
 
             # Retrieve frame ID formatted to 6 digits
             if hasattr(self.dataset, "sample_ids") and i < len(
