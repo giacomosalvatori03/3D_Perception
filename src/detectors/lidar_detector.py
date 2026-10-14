@@ -13,7 +13,10 @@ WEIGHTS_URL = "https://download.openmmlab.com/mmdetection3d/v1.0.0_models/pointp
 
 
 class LidarDetector(BaseDetector):
-
+    """
+    LidarDetector class for 3D object detection using PointPillars model from MMDetection3D. 
+    This class initializes the PointPillars model and provides a method to detect 3D objects from LiDAR point cloud data.
+    """
     def __init__(
         self,
         config_path=None,
