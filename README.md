@@ -1,9 +1,13 @@
 # Robustness Analysis of PointPillars Under LiDAR Sparsification
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-1.10%2B-ee4c2c.svg)](https://pytorch.org/)
-[![OpenMMLab](https://img.shields.io/badge/MMDetection3D-0.17.1-blueviolet.svg)](https://github.com/open-mmlab/mmdetection3d)
-[![Dataset](https://img.shields.io/badge/Dataset-KITTI--3D-yellow.svg)](http://www.cvlibs.net/datasets/kitti/eval_3dobject.php)
+![Miniconda](https://img.shields.io/badge/Environment-Miniconda-green.svg)
+![Python 3.10](https://img.shields.io/badge/Python-3.10-blue.svg)
+![PyTorch 2.0.1](https://img.shields.io/badge/PyTorch-2.0.1-orange.svg)
+![torchvision 0.15.2](https://img.shields.io/badge/torchvision-0.15.2-red.svg)
+![NumPy < 2](https://img.shields.io/badge/NumPy-%3C2.0-013243.svg)
+![MMDetection3D](https://img.shields.io/badge/MMDetection3D-v1.1.0-blueviolet.svg)
+![Google Drive](https://img.shields.io/badge/Storage-Google%20Drive-4285F4.svg)
+![Google Colab](https://img.shields.io/badge/Platform-Google%20Colab%20GPU-yellow.svg)
 
 An empirical investigation into the operational robustness of the **PointPillars** 3D object detection architecture under synthetic LiDAR point cloud sparsification without model retraining.
 
@@ -80,50 +84,30 @@ This repository evaluates how gracefully an off-the-shelf, pre-trained **PointPi
 
 ## 🚀 Quick Start
 
-### Prerequisites
-- Python 3.8+
-- PyTorch 1.10+
-- OpenMMLab (MMDetection3D framework)
-- NumPy, Pandas, Matplotlib, Shapely, OpenCV
+This project was executed on a **Google Colab GPU** instance for high-performance processing, leveraging an attached **Google Drive** for persistent storage and dataset management.
 
-### 1. Global & Range-Based Evaluation
-To run 3D $mAP_{40}$ evaluation on an experiment folder containing predicted label files:
-```bash
-python scripts/lidar_evaluator.py --exp_dir /path/to/experiment_folder --eval_ranges
-```
+### Tech Stack & Dependencies:
+- **Environment**: Miniconda / Google Colab (GPU Runtime recommended)
+- **Python Version**: `3.10`
+- **Core Package Specifications**:
+  - `torch == 2.0.1`
+  - `torchvision == 0.15.2`
+  - `numpy < 2.0` (required for OpenMMLab / MMDetection3D compatibility)
+  - `mmdetection3d` / OpenMMLab ecosystem
+  - `google-colab` & `google-drive` (for storage mounting)
 
-### 2. Plotting Degradation Curves
-```python
-from src.experiment_comparer import ExperimentComparer
+### Dataset Requirements & Setup
+This project uses the **KITTI 3D Object Detection Validation Set** with the reduced point cloud configuration (`velodyne_reduced`).
 
-comparer = ExperimentComparer(experiments_root="/path/to/experiments")
+The dataset is stored on **Google Drive** and mounted into the execution environment. You can automatically download, extract, and structure the dataset by running the provided setup notebook:
 
-# Plot overall degradation across difficulties
-comparer.plot_degradation_curves(
-    exp_order=["baseline_100perc", "beam_32rings", "beam_16rings"],
-    target_class="Car",
-)
+* **Notebook**: `notebooks/00_dataset_setup.ipynb`
+* **Function**: Mounts Google Drive, downloads the `velodyne_reduced` KITTI validation set, and sets up directory paths.
 
-# Plot distance-range degradation (Near, Medium, Far)
-comparer.plot_range_degradation_curves(
-    exp_order=["baseline_100perc", "beam_32rings", "beam_16rings"],
-    target_class="Car",
-    difficulty="Moderate",
-)
-```
+### Environment Setup (Local / Miniconda / Colab)
+If setting up a local environment using **Miniconda** or preparing a fresh Colab session follow the first cell of `notebooks/01_lidar_degradation.ipynb`
 
-### 3. Visualizing Predictions & BEV Point Clouds
-```python
-from src.sample_visualizer import SampleVisualizer
-
-visualizer = SampleVisualizer(data_path="/path/to/kitti_validation")
-visualizer.visualize_experiment(
-    exp_dir="/path/to/experiment_folder",
-    num_samples=2,
-    conf_thresh=0.3,
-    grid_layout=True,
-)
-```
+---
 
 ---
 
