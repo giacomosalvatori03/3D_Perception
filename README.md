@@ -66,14 +66,14 @@ This repository evaluates how gracefully an off-the-shelf, pre-trained **PointPi
 
 ## 📊 Summary of Key Results
 
-| Subsampling Regime | Car Easy ($mAP_{40}$) | Car Mod ($mAP_{40}$) | Pedestrian Mod ($mAP_{40}$) | Cyclist Mod ($mAP_{40}$) |
-| :--- | :---: | :---: | :---: | :---: |
-| **Baseline (100% pts, 64 rings)** | **67.40** | **62.71** | **49.63** | **43.70** |
-| Random Drop ($\rho = 0.75$) | 65.34 | 59.62 | 49.38 | 40.88 |
-| Random Drop ($\rho = 0.50$) | 65.17 | 54.77 | 44.68 | 35.78 |
-| Random Drop ($\rho = 0.25$) | 55.26 | 43.81 | 40.10 | 20.25 |
-| Beam Reduction ($32\text{ rings}$) | 68.04 | 56.61 | 45.04 | 29.62 |
-| **Beam Reduction ($16\text{ rings}$)** | **49.00** | **36.80** | **26.97** | **13.45** |
+| Subsampling Regime | Car Mod ($mAP_{40}$) | Pedestrian Mod ($mAP_{40}$) | Cyclist Mod ($mAP_{40}$) |
+| :--- | :---: | :---: | :---: |
+| **Baseline (100% pts, 64 rings)**  | **62.71** | **49.63** | **43.70** |
+| Random Drop ($\rho = 0.75$) | 59.62 | 49.38 | 40.88 |
+| Random Drop ($\rho = 0.50$) | 54.77 | 44.68 | 35.78 |
+| Random Drop ($\rho = 0.25$) | 43.81 | 40.10 | 20.25 |
+| Beam Reduction ($32\text{ rings}$) | 56.61 | 45.04 | 29.62 |
+| **Beam Reduction ($16\text{ rings}$)** | **36.80** | **26.97** | **13.45** |
 
 ### Core Insights
 1. **High Resilience to Random Drop:** PointPillars retains strong feature representations down to 50% random point drop because local PointNet pillar encoders capture geometric shape effectively.

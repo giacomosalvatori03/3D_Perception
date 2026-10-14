@@ -1,0 +1,182 @@
+\documentclass[10pt, a4paper, twocolumn]{article}
+
+% --- UNIVERSAL PREAMBLE BLOCK ---
+\usepackage[a4paper, top=1.8cm, bottom=1.8cm, left=1.5cm, right=1.5cm]{geometry}
+\usepackage{fontspec}
+\usepackage[english, bidi=basic, provide=*]{babel}
+
+\babelprovide[import, onchar=ids fonts]{english}
+
+% Set default font to Noto Sans as required
+\babelfont{rm}{Noto Sans}
+
+% Smart Package Loading
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{microtype}
+\usepackage{abstract}
+\usepackage{enumitem}
+\usepackage{hyperref}
+
+% Configure section title formatting
+\makeatletter
+\renewcommand\section{\@startsection{section}{1}{\z@}%
+                                   {-2.0ex \@plus -1ex \@minus -.2ex}%
+                                   {1.0ex \@plus .2ex}%
+                                   {\normalfont\large\bfseries}}
+\renewcommand\subsection{\@startsection{subsection}{2}{\z@}%
+                                      {-1.5ex \@plus -1ex \@minus -.2ex}%
+                                      {0.8ex \@plus .2ex}%
+                                      {\normalfont\normalsize\bfseries}}
+\makeatother
+
+% Set compact itemize padding
+\setlist[itemize]{leftmargin=*, noitemsep, topsep=2pt}
+
+\title{\textbf{\Large Robustness Analysis of PointPillars Under LiDAR Sparsification in 3D Object Detection}}
+\author{\textbf{Giacomo Salvatori} \\ 3D Perception, Learning Based Data Fusion - EEIV, Muner}
+\date{\small\today}
+
+\begin{document}
+
+\twocolumn[
+  \begin{topmatter}
+    \maketitle
+    \begin{abstract}
+    \noindent 3D object detection is crucial for autonomous vehicle perception, yet high-resolution 64-beam LiDAR sensors impose significant monetary and computational costs. This paper evaluates the operational robustness of the PointPillars architecture subjected to two controlled data sparsification regimes without model retraining: uniform random point drop ($\rho \in \{1.0, 0.75, 0.50, 0.25\}$) and vertical beam reduction (64 to 32 to 16 rings). Evaluating performance on the KITTI validation dataset via $mAP_{40}$ metrics across standard difficulties (Easy, Moderate, Hard) and range-segmented spatial intervals ($0\text{--}20\text{ m}$, $20\text{--}40\text{ m}$, $40\text{--}70\text{ m}$), we quantify spatial degradation patterns. Our findings demonstrate that PointPillars exhibits strong resilience under uniform density reduction down to $50\%$, whereas vertical beam reduction induces severe performance decay, particularly for distant targets ($>40\text{ m}$) and small object categories.
+    \end{abstract}
+    \vspace{0.8em}
+  \end{topmatter}
+]
+
+\section{Introduction}
+3D perception is fundamental for autonomous driving, providing precise geometric structure through LiDAR point clouds. However, standard 64-beam mechanical LiDAR sensors (e.g., Velodyne HDL-64E) are constrained by high cost, mechanical complexity, and computational overhead. Autonomous vehicles frequently operate using lower-beam hardware (e.g., 32 or 16 rings) or encounter adverse environmental conditions that cause significant point loss.
+
+Understanding how pre-trained 3D detectors degrade under hardware reduction is essential for sensor deployment and fail-safe perception design. In this work, we evaluate an off-the-shelf PointPillars model under synthetic sparsification on the KITTI benchmark.
+
+\subsection{Main Contributions}
+\begin{itemize}
+    \item \textbf{Sparsification Pipeline:} An automated preprocessing framework supporting uniform random point drop and realistic elevation-based vertical ring subsampling.
+    \item \textbf{Range-Aware Evaluation Framework:} A depth-aware evaluation module segmenting the camera $Z$-axis into \textit{Near}, \textit{Medium}, and \textit{Far} spatial zones.
+    \item \textbf{Quantitative Degradation Analysis:} A comparative benchmark assessing class-wise sensitivity and depth breakdown under hardware sparsification.
+\end{itemize}
+
+\section{Methodology}
+
+\subsection{PointPillars Architecture Overview}
+PointPillars converts unstructured LiDAR point clouds $P = \{p_i = (x_i, y_i, z_i, r_i)\}_{i=1}^N$ into 2D pseudo-images to utilize efficient 2D convolutional networks. The architecture consists of three principal modules:
+\begin{enumerate}[leftmargin=*, noitemsep]
+    \item \textbf{Pillar Feature Encoder:} Point clouds are partitioned into vertical pillars along the $x\text{-}y$ plane. A simplified PointNet extracts a feature vector per pillar, constructing a sparse pseudo-image tensor.
+    \item \textbf{2D CNN Backbone:} A feature extraction network utilizing top-down convolutional layers and feature pyramid networks (FPN) to aggregate multi-scale contextual features.
+    \item \textbf{Single-Stage Detection Head:} A 2D SSD head predicting 3D bounding box parameters $(x, y, z, h, w, l, \theta)$ and class probabilities using 3D anchors.
+\end{enumerate}
+
+\subsection{LiDAR Subsampling Pipeline}
+To evaluate degradation without modifying network weights, point clouds are processed through two sparsification operations prior to inference:
+
+\subsubsection{Uniform Random Point Drop}
+To simulate point density loss caused by atmospheric absorption or reduced sensor sensitivity, input point clouds are sampled at fixed keep ratios $\rho \in \{1.0, 0.75, 0.50, 0.25\}$. Given an initial point cloud of size $N$, $N_{\text{keep}} = \lfloor \rho \cdot N \rfloor$ points are selected uniformly at random across the spatial domain without replacement.
+
+\subsubsection{Vertical Beam Reduction}
+To simulate hardware downgrades from 64-ring sensors to 32-ring or 16-ring sensors, points are filtered based on their vertical elevation angle $\theta$. For a point $p_i = (x_i, y_i, z_i)$, elevation is computed as:
+\begin{equation}
+\theta = \arcsin\left(\frac{z_i}{\sqrt{x_i^2 + y_i^2 + z_i^2}}\right)
+\end{equation}
+The dynamic elevation range $[\theta_{\min}, \theta_{\max}]$ is divided into $N_{\text{orig}} = 64$ ring channels. Downsampling strides $S = N_{\text{orig}} / N_{\text{target}}$ ($S=2$ for 32 rings, $S=4$ for 16 rings) filter points belonging to non-selected ring channels.
+
+\subsection{Spatial Depth Range Evaluation Framework}
+Standard KITTI $mAP_{40}$ metrics integrate predictions over the full range ($0\text{--}70\text{ m}$), obscuring depth-specific failure modes. We partition ground-truth boxes and model predictions along the camera $Z$-axis into three distinct depth ranges:
+\begin{itemize}
+    \item \textbf{Near Range:} $Z \in [0, 20)\text{ m}$ (high point density, immediate collision zone).
+    \item \textbf{Medium Range:} $Z \in [20, 40)\text{ m}$ (standard operational driving range).
+    \item \textbf{Far Range:} $Z \in [40, 70]\text{ m}$ (sparse point returns, long-range perception).
+\end{itemize}
+
+\section{Experimental Results \& Discussion}
+
+\subsection{Quantitative \& Class Sensitivity Analysis}
+We evaluate the PointPillars baseline on the KITTI validation set across all subsampling regimes using 3D $mAP_{40}$ at standard IoU thresholds ($0.70$ for Car, $0.50$ for Pedestrian and Cyclist). Table~\ref{tab:kitti_results} summarizes the results across difficulty levels.
+
+\begin{table}[htbp]
+\centering
+\caption{3D $mAP_{40}$ performance across sparsification regimes on KITTI Validation Set.}
+\label{tab:kitti_results}
+\vspace{0.4em}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{l|ccc|ccc|ccc}
+\toprule
+\textbf{Subsampling} & \multicolumn{3}{c|}{\textbf{Car (IoU 0.70)}} & \multicolumn{3}{c|}{\textbf{Pedestrian (IoU 0.50)}} & \multicolumn{3}{c}{\textbf{Cyclist (IoU 0.50)}} \\
+\textbf{Regime} & Easy & Mod. & Hard & Easy & Mod. & Hard & Easy & Mod. & Hard \\
+\midrule
+Baseline ($100\%$, 64 rings) & 67.40 & 62.71 & 59.77 & 53.82 & 49.63 & 44.13 & 48.11 & 43.70 & 42.59 \\
+Random Drop ($\rho=0.75$)   & 65.34 & 59.62 & 56.88 & 55.25 & 49.38 & 44.93 & 50.24 & 40.88 & 40.34 \\
+Random Drop ($\rho=0.50$)   & 65.17 & 54.77 & 51.99 & 54.77 & 49.56 & 44.68 & 46.91 & 35.78 & 35.57 \\
+Random Drop ($\rho=0.25$)   & 55.26 & 43.81 & 39.42 & 45.55 & 40.10 & 35.57 & 28.50 & 20.25 & 21.25 \\
+\midrule
+Beam Reduc. (32 rings)      & 68.04 & 56.61 & 52.01 & 50.47 & 45.04 & 40.38 & 41.82 & 29.62 & 30.63 \\
+Beam Reduc. (16 rings)      & 49.00 & 36.80 & 33.85 & 31.75 & 26.97 & 24.00 & 18.90 & 13.45 & 14.93 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\paragraph{Key Observations:}
+
+1) PointPillars demonstrates high robustness under uniform random drop down to $\rho = 0.50$. Local PointNet feature extraction inside pillars aggregates sparse point features without loss of geometric cues. At $\rho = 0.25$, performance drops at $43.81\%$ in Moderate Car $mAP_{40}$.
+
+2) Vertical beam reduction degrades performance far more severely than uniform drop. Downsampling to 16 beams causes a drop of $36.80\%$ in Moderate Car $mAP_{40}$.
+
+3) Small and non-rigid categories (Pedestrian, Cyclist) suffer disproportionately under beam reduction. At 16 beams, Pedestrian Moderate $mAP_{40}$ drops to $26.97\%$, as thin vertical structures lose scanlines required for anchor matching.
+
+\subsection{Range-Dependent Breakdown Analysis}
+Evaluating performance across depth intervals ($Near$, $Medium$, $Far$) uncovers spatial failure modes obscured by global metrics.
+
+\begin{figure}[htbp]
+  \centering
+  \framebox{%
+    \parbox{0.92\columnwidth}{%
+      \centering
+      \vspace{0.3cm}
+
+      \includegraphics[width=0.48\linewidth]{pictures/random_degradation_car.png}%
+      \hfill
+      \includegraphics[width=0.48\linewidth]{pictures/range_degradation.png}
+
+      \vspace{0.3cm}
+    }%
+  }
+  \caption{Performance degradation curves across uniform random point drop.}
+  \label{fig:overall_degradation}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \framebox{\parbox{0.92\columnwidth}{%
+      \centering
+      \vspace{0.3cm}
+
+      \includegraphics[width=0.48\linewidth]{pictures/beam_degradation_car.png}%
+      \hfill
+      \includegraphics[width=0.48\linewidth]{pictures/beam_range_degradation.png}
+
+      \vspace{0.3cm}
+     }%
+  }
+  \caption{Performance degradation curves across vertical beam reduction.}
+  \label{fig:range_degradation}
+\end{figure}
+
+\paragraph{Spatial Findings:}
+\begin{itemize}
+    \item \textbf{Near Range ($0\text{--}20\text{ m}$):} High point density ensures strong resilience ($>55\%$ $mAP_{40}$ retention for Cars at 16 beams).
+    \item \textbf{Far Range ($40\text{--}70\text{ m}$):} Severe degradation. Under 16-beam sampling or $\rho=0.25$, distant objects return too low points, falling below the pillar encoder threshold.
+\end{itemize}
+
+\section{Conclusion \& Future Work}
+This paper presented a quantitative evaluation of PointPillars under LiDAR sparsification without retraining. Results confirm that while PointPillars is resilient to uniform density drop down to $50\%$, vertical beam reduction induces severe degradation, especially for far objects ($>40\text{ m}$) and small categories.
+
+\subsection{Future Work}
+Building upon these findings, our next step is to incorporate RGB camera imagery—already available within the KITTI benchmark—and employ multi-modal sensor fusion algorithms. We aim to investigate whether camera-LiDAR data fusion can effectively compensate for the precision drops and missing geometric cues caused by LiDAR sparsification.
+
+\end{document}
