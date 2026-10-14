@@ -76,24 +76,21 @@ class CameraValidator:
 
         for i in tqdm(range(total_samples), desc="Processing 2D Frames"):
             sample = self.dataset[i]
-            img_path = sample["sample_id"]
 
-            # Retrieve frame ID formatted to 6 digits
-            if hasattr(self.dataset, "sample_ids") and i < len(
-                self.dataset.sample_ids
-            ):
-                sample_id = str(self.dataset.sample_ids[i]).zfill(6)
-            else:
-                sample_id = f"{i:06d}"
+            # Save sample ID and image path
+            sample_id = sample["sample_id"]
+            img_path = os.path.join(
+                self.data_path, "image_2", f"{sample_id}.png"
+            )
 
-            # 1. Save Ground Truth label file
+            # Save Ground Truths in KITTI format
             gt_objs = sample["gt_boxes"]
             gt_txt_path = os.path.join(gt_dir, f"{sample_id}.txt")
             with open(gt_txt_path, "w") as f_gt:
                 for obj in gt_objs:
                     f_gt.write(self.format_gt_line(obj))
 
-            # 2. Run 2D Camera Inference and export predictions
+            # Run 2D Camera Inference and export predictions
             detections_2d = self.detector.detect(img_path)
             pred_txt_path = os.path.join(pred_dir, f"{sample_id}.txt")
 
