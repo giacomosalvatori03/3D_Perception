@@ -122,7 +122,6 @@ class CameraVisualizer:
             axes[i].set_title(
                 f"Frame #{sid} - Detection 2D (Green: Ground Truth | Red: YOLOv8 Pred)",
                 fontsize=11,
-                fontweight="bold",
             )
             axes[i].axis("off")
 
