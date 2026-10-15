@@ -30,7 +30,13 @@ class CameraVisualizer:
 
                 cls_name = parts[0]
                 xmin, ymin, xmax, ymax = [float(x) for x in parts[4:8]]
-                score = float(parts[14]) if is_pred and len(parts) >= 15 else 1.0
+
+                if is_pred and len(parts) >= 16:
+                    score = float(parts[-1])
+                elif is_pred and len(parts) == 15:
+                    score = float(parts[14])
+                else:
+                    score = 1.0
 
                 if is_pred and score < conf_thresh:
                     continue
