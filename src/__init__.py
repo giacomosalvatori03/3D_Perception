@@ -5,6 +5,7 @@ from src.kitti_dataset import KittiDataset
 from src.visualizer import Visualizer
 from scripts.lidar_evaluator import KittiEvaluator
 from scripts.camera_evaluator import CameraEvaluator
+from scripts.camera_visualizer import CameraVisualizer
 
 # Project 1: Safe optional import for detectors requiring mmdet3d and CUDA dependencies
 try:
@@ -29,8 +30,9 @@ __all__ = [
     'LidarSparsifier',
     'Visualizer',
     'KittiEvaluator',
-    'SampleVisualizer',
+    'LidarVisualizer',
     'KittiEvaluator',
-    'CameraEvaluator'
+    'CameraEvaluator',
+    'CameraVisualizer',
 ]
 

@@ -12,7 +12,7 @@ from scripts.sparsifier import LidarSparsifier
 from src.visualizer import Visualizer
 
 
-class SampleVisualizer:
+class LidarVisualizer:
     """Utility class to identify complex KITTI frames and visualize GT vs Predictions
 
     in a compact grid format, correctly applying the experiment's LiDAR
