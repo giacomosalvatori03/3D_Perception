@@ -36,14 +36,13 @@ class TraditionalFusion:
         img_shape: tuple = (375, 1242),
     ) -> List[float]:
         """
-        Projects a 3D bounding box (Camera Rectified Frame) onto the 2D image plane.
-        Returns 2D bounding box [xmin, ymin, xmax, ymax].
+        Projects a 3D bounding box (Camera Rectified Frame) onto the 2D image plane using the P2 matrix.
         """
         h, w, l = dimensions_3d
         x, y, z = location_3d
         ry = rotation_y
 
-        # 8 corners in Camera Rectified reference frame (Y is down, X is right, Z is front)
+        # 8 vertices 3D in camera rectified reference (Y down, X right, Z forward)
         x_corners = [w / 2, w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2]
         y_corners = [0, 0, 0, 0, -h, -h, -h, -h]
         z_corners = [l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2, l / 2]
@@ -63,23 +62,28 @@ class TraditionalFusion:
         corners_3d[1, :] += y
         corners_3d[2, :] += z
 
-        # Security filter: ignore objects behind or too close to camera
+        # Safe check: if any corner is behind the camera (Z <= 0.1), return an empty bbox
         if np.any(corners_3d[2, :] <= 0.1):
             return [0.0, 0.0, 0.0, 0.0]
 
-        try:
-            pts_2d = calib.rect2img(corners_3d.T)
-            xmin = max(0.0, float(np.min(pts_2d[:, 0])))
-            ymin = max(0.0, float(np.min(pts_2d[:, 1])))
-            xmax = min(float(img_shape[1]), float(np.max(pts_2d[:, 0])))
-            ymax = min(float(img_shape[0]), float(np.max(pts_2d[:, 1])))
+        # Direct projection using the P2 matrix
+        corners_3d_hom = np.vstack(
+            [corners_3d, np.ones((1, 8), dtype=np.float32)]
+        )  # (4, 8)
+        pts_2d_hom = np.dot(calib.P2, corners_3d_hom)  # (3, 8)
 
-            if (xmax - xmin) < 3 or (ymax - ymin) < 3:
-                return [0.0, 0.0, 0.0, 0.0]
+        # Omogeneous normalization (divide by depth Z)
+        pts_2d = (pts_2d_hom[:2, :] / pts_2d_hom[2, :]).T  # (8, 2)
 
-            return [xmin, ymin, xmax, ymax]
-        except Exception:
+        xmin = max(0.0, float(np.min(pts_2d[:, 0])))
+        ymin = max(0.0, float(np.min(pts_2d[:, 1])))
+        xmax = min(float(img_shape[1]), float(np.max(pts_2d[:, 0])))
+        ymax = min(float(img_shape[0]), float(np.max(pts_2d[:, 1])))
+
+        if (xmax - xmin) < 3 or (ymax - ymin) < 3:
             return [0.0, 0.0, 0.0, 0.0]
+
+        return [xmin, ymin, xmax, ymax]
 
     @staticmethod
     def compute_iou_2d(boxA: List[float], boxB: List[float]) -> float:
