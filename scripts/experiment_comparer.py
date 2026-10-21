@@ -92,8 +92,13 @@ class ExperimentComparer:
         target_class: str = "Car",
         difficulty: str = "Moderate",
         exp_order: Optional[List[str]] = None,
+        exclude_64beams: bool = True,
+        save_dir: Optional[str] = None,
     ) -> pd.DataFrame:
-        """Computes absolute ΔmAP (points) and relative gain (%) of Late Fusion over LiDAR-Only."""
+        """
+        Computes absolute ΔmAP (points) and relative gain (%) of Late Fusion over LiDAR-Only,
+        excluding 64-beam experiments by default and optionally saving reports to Drive.
+        """
         f_root = fusion_root or self.fusion_root
         if not f_root or not os.path.exists(f_root):
             raise FileNotFoundError(f"Fusion root directory not found: {f_root}")
@@ -124,6 +129,10 @@ class ExperimentComparer:
         if exp_order is None:
             exp_order = self._sort_experiment_names(list(s_lidar.index))
 
+        # Automatic exclusion of 64 beams from the experiments
+        if exclude_64beams:
+            exp_order = [e for e in exp_order if "64" not in e.lower()]
+
         rows = []
         for exp in exp_order:
             val_l = s_lidar.get(exp, None)
@@ -137,11 +146,23 @@ class ExperimentComparer:
                     "Experiment": exp,
                     "LiDAR-Only (%)": round(val_l, 2),
                     "Late Fusion (%)": round(val_f, 2),
-                    "Δ Assoluto (% pts)": round(delta_abs, 2),
-                    "Δ Relativo (%)": round(delta_rel, 2),
+                    "Absolute Δ (% pts)": round(delta_abs, 2),
+                    "Relative Δ (%)": round(delta_rel, 2),
                 })
 
         df_res = pd.DataFrame(rows)
+
+        # Save automatically in Drive if save_dir is specified
+        if save_dir and not df_res.empty:
+            os.makedirs(save_dir, exist_ok=True)
+            base_name = f"gain_matrix_{target_class.lower()}_{difficulty.lower()}"
+            csv_path = os.path.join(save_dir, f"{base_name}.csv")
+            md_path = os.path.join(save_dir, f"{base_name}.md")
+
+            df_res.to_csv(csv_path, index=False)
+            df_res.to_markdown(md_path, index=False)
+            print(f" Gain Matrix saved to Drive: {csv_path} and {md_path}")
+
         return df_res
 
     def plot_fusion_vs_lidar_overlay(
@@ -152,8 +173,11 @@ class ExperimentComparer:
         difficulty: str = "Moderate",
         title: str = "Robustness Comparison: LiDAR-Only vs Late Fusion",
         save_path: Optional[str] = None,
+        exclude_64beams: bool = True,
     ):
-        """Plots overlaid mAP40 degradation curves comparing LiDAR-Only against Late Fusion."""
+        """Plots overlaid mAP40 degradation curves comparing LiDAR-Only against Late Fusion,
+        filtering out 64-beam redundant experiments by default.
+        """
         f_root = fusion_root or self.fusion_root
         if not f_root or not os.path.exists(f_root):
             raise FileNotFoundError(f"Fusion root directory not found: {f_root}")
@@ -178,6 +202,10 @@ class ExperimentComparer:
 
         if exp_order is None:
             exp_order = self._sort_experiment_names(list(s_lidar.index))
+
+        # Automatic exclusion of 64 beams from the experiments
+        if exclude_64beams:
+            exp_order = [e for e in exp_order if "64" not in e.lower()]
 
         y_lidar = [s_lidar.get(e, None) for e in exp_order]
         y_fusion = [
