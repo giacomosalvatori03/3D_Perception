@@ -1,88 +1,67 @@
-# Robustness Analysis of PointPillars Under LiDAR Sparsification
+# 3D Perception & Multi-Modal Late Fusion Under Hardware Degradation
 
-![Miniconda](https://img.shields.io/badge/Environment-Miniconda-green.svg)
-![Python 3.10](https://img.shields.io/badge/Python-3.10-blue.svg)
-![PyTorch 2.0.1](https://img.shields.io/badge/PyTorch-2.0.1-orange.svg)
-![torchvision 0.15.2](https://img.shields.io/badge/torchvision-0.15.2-red.svg)
-![NumPy < 2](https://img.shields.io/badge/NumPy-%3C2.0-013243.svg)
-![OpenMMLab](https://img.shields.io/badge/MMDetection3D-0.17.1-blueviolet.svg)
-![Google Drive](https://img.shields.io/badge/Storage-Google%20Drive-4285F4.svg)
-![Google Colab](https://img.shields.io/badge/Platform-Google%20Colab%20GPU-yellow.svg)
+![KITTI Benchmark](https://img.shields.io/badge/Dataset-KITTI-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.8%2B-green.svg)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange.svg)
+![MMDetection3D](https://img.shields.io/badge/Framework-MMDetection3D-purple.svg)
 
-An empirical investigation into the operational robustness of the **PointPillars** 3D object detection architecture under synthetic LiDAR point cloud sparsification without model retraining.
-
-This project forms **Project #1** of the Master's research course *3D Perception, Learning-Based Data Fusion* at the **University of Parma (UNIPR)** within the **MUNER - Electric Vehicle Engineering (EEIV)** program in the **ADE - Autonomous Driving Engineering (ADE)** curriculum.
+This repository contains the **Project #1, #2** of the Master's course *3D Perception, Learning-Based Data Fusion* at the **University of Parma (UNIPR)** within the **MUNER - Electric Vehicle Engineering (EEIV)** program in the **ADE - Autonomous Driving Engineering (ADE)** curriculum.
 
 ---
 
-## 📌 Project Overview & Motivation
+## 📌 Repository Overview
 
-High-resolution 64-beam mechanical LiDAR sensors (e.g., Velodyne HDL-64E) provide accurate 3D geometry for autonomous perception but introduce significant monetary cost, computational load, and mechanical failure risks. Furthermore, production autonomous vehicles frequently deploy lower-cost sensors (32 or 16 beams) or encounter atmospheric point absorption due to rain, fog, and spray.
+This repository contains the complete experimental suite and source code for a two-stage research study evaluating the operational robustness of 3D object detection under synthetic sensor degradation and designing mitigation strategies via camera-LiDAR sensor fusion:
 
-This repository evaluates how gracefully an off-the-shelf, pre-trained **PointPillars** detector degrades under synthetic point cloud subsampling on the **KITTI 3D Object Detection Benchmark** under a **zero-retraining protocol**.
+1. **Project #1: Robustness Analysis of PointPillars Under LiDAR Sparsification**  
+   *Quantifying $mAP_{40}$ degradation of an off-the-shelf PointPillars model under uniform random point drops ($75\%, 50\%, 25\%$) and elevation-based vertical beam reductions ($64 \to 32 \to 16$ rings) across standard difficulties and range-segmented spatial zones ($0\text{--}20\text{m}$, $20\text{--}40\text{m}$, $40\text{--}70\text{m}$).*
 
----
+2. **Project #2: Class-Adaptive Multi-Modal Late Fusion for Severe Sparsification**  
+   *Developing a training-free 2D-3D Late Fusion framework combining PointPillars (3D LiDAR) and YOLOv8m (2D RGB Camera) via calibration-guided projection ($P_2$ matrix). Introduces a Class-Adaptive Calibration strategy to solve "False Positive Promotion" on large vehicle bounding boxes while maximizing recall recovery for point-sparse categories (Pedestrians, Cyclists).*
 
-## ⚙️ Key Features
-
-- **Two-Stage Sparsification Pipeline:**
-  - **Uniform Random Point Drop:** Simulates atmospheric point absorption by retaining fixed point fractions ($\rho \in \{1.0, 0.75, 0.50, 0.25\}$).
-  - **Vertical Beam Reduction:** Simulates hardware downgrades ($64 \to 32 \to 16$ rings) via vertical elevation angle ($\theta$) filtering.
-- **Range-Aware Evaluation Framework:** Extends standard KITTI $mAP_{40}$ metrics with spatial depth breakdown along the camera Z-axis:
-  - **Near Zone:** $0 - 20\text{m}$ (High density, critical collision avoidance)
-  - **Medium Zone:** $20 - 40\text{m}$ (Standard urban driving range)
-  - **Far Zone:** $40 - 70\text{m}$ (Sparse point returns, long-range perception)
-- **Automated Logging & Reporting:** Exports structured metrics to `.json`, `.csv`, `.md`, and `.tex` formats automatically.
-- **Qualitative Visual Inspection:** Side-by-side rendering of 3D projected bounding boxes on 2D RGB imagery and Bird's Eye View (BEV) point clouds matching the exact experiment sparsification level.
 
 ---
 
-## 📁 Repository Structure
+## 🧪 Project #1: PointPillars Robustness Analysis
 
-```
-.
-├── notebooks
-|   ├── 00_test_dataset.ipynb       # Test the correct initialization of the dataset
-|   └── 01_lidar_degradation.ipynb  # LiDAR sparsification evaluation pipeline
-├── scripts/
-|   ├── experiment_comparer.py      # Aggregates experiment JSONs & plots degradation curves 
-│   ├── lidar_evaluator.py          # Unified KITTI 3D mAP40 & distance-range evaluator
-|   ├── sample_visualizer.py        # High-level visual inspector (Camera projection + BEV)
-|   └── sparsifier.py               # LidarSparsifier module (Random drop & Beam reduction)
-├── src/
-|   ├── calibration.py              # Calibration functions between LiDAR and Camera frame
-│   ├── detection.py                # 3D Bounding Box detection data structure 
-│   ├── kitti_dataset.py            # KITTI validation set loader and parser
-│   ├── visualizer.py               # OpenCV & Matplotlib drawing utilities for 3D boxes & BEV
-|   └── detectors/
-|       ├── base_detector.py        # Base class for the 3D detectors
-|       └── lidar_detector.py       # 3D object detection based on PointPillars
-├── validate_lidar.py               # Inference on the validation dataset with sparsification  
-├── paper_1.pdf                    # IEEE 2-column format conference paper draft
-└── README.md                       # Project documentation
-```
+To evaluate the operational boundaries of deep-learning-based 3D perception architectures without retraining, this project investigates how an off-the-shelf PointPillars detector degrades when subjected to synthetic LiDAR point cloud sparsification. The study simulates real-world hardware downgrades and environmental point loss on the KITTI benchmark across two controlled subsampling regimes: uniform random point drops ($\rho \in \{1.0, 0.75, 0.50, 0.25\}$) and vertical elevation beam reductions ($64 \to 32 \to 16$ rings). The analysis quantifies $mAP_{40}$ performance decay across standard KITTI difficulty tiers and range-segmented spatial intervals ($0\text{--}20\text{m}$, $20\text{--}40\text{m}$, $40\text{--}70\text{m}$).
 
 ---
 
-## 📊 Summary of Key Results
+## 🔀 Project #2: Class-Adaptive Multi-Modal Late Fusion
 
-| Subsampling Regime | Car Mod ($mAP_{40}$) | Pedestrian Mod ($mAP_{40}$) | Cyclist Mod ($mAP_{40}$) |
-| :--- | :---: | :---: | :---: |
-| **Baseline (100% pts, 64 rings)**  | **62.71** | **49.63** | **43.70** |
-| Random Drop ($\rho = 0.75$) | 59.62 | 49.38 | 40.88 |
-| Random Drop ($\rho = 0.50$) | 54.77 | 44.68 | 35.78 |
-| Random Drop ($\rho = 0.25$) | 43.81 | 40.10 | 20.25 |
-| Beam Reduction ($32\text{ rings}$) | 56.61 | 45.04 | 29.62 |
-| **Beam Reduction ($16\text{ rings}$)** | **36.80** | **26.97** | **13.45** |
+To compensate for 3D point loss without model retraining, candidate 3D bounding boxes from PointPillars (extracted at a lowered candidate threshold $\tau = 0.10$) are projected onto the 2D image plane using calibration matrix $P_2$ and rescored using 2D detections from YOLOv8m:
 
-### Core Insights
-1. **High Resilience to Random Drop:** PointPillars retains strong feature representations down to 50% random point drop because local PointNet pillar encoders capture geometric shape effectively.
-2. **Vulnerability to Hardware Downscaling:** Vertical beam reduction causes far more severe degradation than random point drop. 16-beam sampling drops Moderate Car $mAP_{40}$ to $36.80\%$ and Pedestrian $mAP_{40}$ to $26.97\%$.
-3. **Spatial Decay:** Performance remains highly resilient in the Near range ($0-20\text{m}$) but experiences severe recall collapse in the Far range ($>40\text{m}$) where objects return fewer than 5 points total.
+$$S_{\text{fused}} = \min\left(1.0, \, S_{\text{3D}} + \alpha_c \cdot S_{\text{2D}} \cdot \text{IoU}_{\text{2D}}\right)$$
+
+### The Class-Specific Dilemma & Solution
+Applying uniform fusion parameters causes **False Positive Promotion** on Cars: large 2D bounding footprints allow depth-displaced 3D ghost boxes to exceed IoU thresholds and get artificially boosted. 
+
+To resolve this, we implement a **Class-Adaptive Configuration**:
+
+| Object Class | $2\text{D IoU}_{\text{thresh}}$ | Boost Factor ($\alpha$) | Final Cutoff ($\tau_{\text{final}}$) | Rationale |
+| :--- | :---: | :---: | :---: | :--- |
+| **Car** | **$0.50$** | **$0.10$** | **$0.30$** | Restrictive matching suppresses depth-displaced false positives. |
+| **Pedestrian** | **$0.25$** | **$0.35$** | **$0.20$** | Permissive recovery for point-sparse human structures. |
+| **Cyclist** | **$0.25$** | **$0.35$** | **$0.20$** | Permissive recovery for thin object profiles. |
 
 ---
 
-## 🚀 Quick Start
+## 📊 Summary Results (Moderate $mAP_{40}$)
+
+Comparison of **LiDAR-Only** vs. **Class-Adaptive Late Fusion** on the KITTI Validation Set across severe degradation regimes:
+
+| Subsampling Configuration | Car (LiDAR) | Car (Fused) | Pedestrian (LiDAR) | Pedestrian (Fused) | Cyclist (LiDAR) | Cyclist (Fused) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Baseline (100% / 64 Beams)** | 62.71% | **62.75%** | 50.11% | **50.35%** | 43.70% | **44.02%** |
+| **Random Drop 50%** | 54.77% | **56.10%** | 46.12% | **46.87%** | 28.15% | **28.70%** |
+| **Random Drop 25%** | 43.81% | **44.48%** | 35.57% | **36.43%** | 20.25% | **20.48%** |
+| **Beam Reduction (32 Rings)** | 56.61% | **56.85%** | 45.10% | **45.59%** | 29.62% | **30.10%** |
+| **Beam Reduction (16 Rings)** | 36.80% | **37.75%** | 26.97% | **28.16%** | 13.45% | **14.33%** |
+
+---
+
+## 🚀 Quickstart & Usage
 
 This project was executed on a **Google Colab GPU** instance for high-performance processing, leveraging an attached **Google Drive** for persistent storage and dataset management.
 
@@ -104,15 +83,15 @@ The dataset is stored on **Google Drive** and mounted into the execution environ
 ### Environment Setup (Local / Miniconda / Colab)
 If setting up a local environment using **Miniconda** or preparing a fresh Colab session follow the first cell of `notebooks/01_lidar_degradation.ipynb`
 
----
 
 ---
 
-## 🔮 Next Steps: Project #2 (Camera-LiDAR Fusion)
+## 🔮 Next Steps: Project #3 (Learning-Based Data Fusion)
 
-The findings from this project demonstrate that single-modality 3D point cloud detectors suffer severe geometric limits when beam resolution drops. 
+While Project #2 successfully eliminates *False Positive Promotion* using handcrafted class-adaptive rules, rule-based fusion relies on static geometric thresholds that require manual tuning and cannot adjust dynamically to varying environment conditions or depth levels.
 
-**Project #2** will investigate multi-modal **Camera-LiDAR Sensor Fusion** by incorporating 2D RGB imagery (already available in the KITTI benchmark) to determine if feature-level cross-attention can recover the recall loss caused by LiDAR sparsification.
+**Project #3** will explore **Learning-Based Multi-Modal Data Fusion** architectures to transition from rule-based scoring to a data-driven paradigm.
+
 
 ---
 
