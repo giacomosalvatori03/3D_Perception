@@ -1,9 +1,13 @@
 # 3D Perception & Multi-Modal Late Fusion Under Hardware Degradation
 
-![KITTI Benchmark](https://img.shields.io/badge/Dataset-KITTI-blue.svg)
-![Python](https://img.shields.io/badge/Python-3.8%2B-green.svg)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange.svg)
-![MMDetection3D](https://img.shields.io/badge/Framework-MMDetection3D-purple.svg)
+![Miniconda](https://img.shields.io/badge/Environment-Miniconda-green.svg)
+![Python 3.10](https://img.shields.io/badge/Python-3.10-blue.svg)
+![PyTorch 2.0.1](https://img.shields.io/badge/PyTorch-2.0.1-orange.svg)
+![torchvision 0.15.2](https://img.shields.io/badge/torchvision-0.15.2-red.svg)
+![NumPy < 2](https://img.shields.io/badge/NumPy-%3C2.0-013243.svg)
+![OpenMMLab](https://img.shields.io/badge/MMDetection3D-0.17.1-blueviolet.svg)
+![Google Drive](https://img.shields.io/badge/Storage-Google%20Drive-4285F4.svg)
+![Google Colab](https://img.shields.io/badge/Platform-Google%20Colab%20GPU-yellow.svg)
 
 This repository contains the **Project #1, #2** of the Master's course *3D Perception, Learning-Based Data Fusion* at the **University of Parma (UNIPR)** within the **MUNER - Electric Vehicle Engineering (EEIV)** program in the **ADE - Autonomous Driving Engineering (ADE)** curriculum.
 
@@ -14,10 +18,10 @@ This repository contains the **Project #1, #2** of the Master's course *3D Perce
 This repository contains the complete experimental suite and source code for a two-stage research study evaluating the operational robustness of 3D object detection under synthetic sensor degradation and designing mitigation strategies via camera-LiDAR sensor fusion:
 
 1. **Project #1: Robustness Analysis of PointPillars Under LiDAR Sparsification**  
-   *Quantifying $mAP_{40}$ degradation of an off-the-shelf PointPillars model under uniform random point drops ($75\%, 50\%, 25\%$) and elevation-based vertical beam reductions ($64 \to 32 \to 16$ rings) across standard difficulties and range-segmented spatial zones ($0\text{--}20\text{m}$, $20\text{--}40\text{m}$, $40\text{--}70\text{m}$).*
+   *Quantifying mAP40 degradation of an off-the-shelf PointPillars model under uniform random point drops (75%, 50%, 25%) and elevation-based vertical beam reductions (64 → 32 → 16 rings) across standard difficulties and range-segmented spatial intervals (0–20m, 20–40m, 40–70m).*
 
 2. **Project #2: Class-Adaptive Multi-Modal Late Fusion for Severe Sparsification**  
-   *Developing a training-free 2D-3D Late Fusion framework combining PointPillars (3D LiDAR) and YOLOv8m (2D RGB Camera) via calibration-guided projection ($P_2$ matrix). Introduces a Class-Adaptive Calibration strategy to solve "False Positive Promotion" on large vehicle bounding boxes while maximizing recall recovery for point-sparse categories (Pedestrians, Cyclists).*
+   *Developing a training-free 2D-3D Late Fusion framework combining PointPillars (3D LiDAR) and YOLOv8m (2D RGB Camera) via calibration-guided projection (P₂ matrix). Introduces a Class-Adaptive Calibration strategy to solve "False Positive Promotion" on large vehicle bounding boxes while maximizing recall recovery for point-sparse categories (Pedestrians, Cyclists).*
 
 
 ---
