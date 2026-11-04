@@ -1,5 +1,6 @@
 import os
 import glob
+import shutil
 import torch
 import numpy as np
 
@@ -11,15 +12,9 @@ class FastCLOCsEvaluator:
     """
     Inference engine for Fast-CLOCs.
     Loads trained weights, updates 3D candidate confidence scores,
-    and exports updated KITTI prediction text files for mAP40 evaluation.
-    Supports optional frame filtering (e.g., using val_frames.txt) for strict evaluation.
+    and exports updated KITTI prediction text files formatted for LidarEvaluator.
     """
     def __init__(self, model_path: str, device: str = None):
-        """
-        Args:
-            model_path (str): Path to trained .pth model checkpoint.
-            device (str, optional): Computation device ('cuda' or 'cpu').
-        """
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
@@ -37,23 +32,23 @@ class FastCLOCsEvaluator:
         pred_3d_dir: str,
         pred_2d_dir: str,
         output_dir: str,
+        gt_3d_dir: str = None,
         val_frames_file: str = None,
         conf_thresh: float = 0.10
     ):
         """
-        Executes score alignment across frame prediction files and saves updated predictions.
-
-        Args:
-            pred_3d_dir (str): Path to input 3D candidate predictions.
-            pred_2d_dir (str): Path to input 2D candidate predictions.
-            output_dir (str): Directory to store updated prediction text files.
-            val_frames_file (str, optional): Path to text file containing target validation frame IDs (e.g., val_frames.txt).
-                                            If provided, only these frames will be evaluated.
-            conf_thresh (float): Final confidence cutoff threshold for output boxes.
+        Executes score alignment, builds standard output hierarchy (pred_labels and gt_labels),
+        and copies ground truth annotations if gt_3d_dir is provided.
         """
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Load allowed frame IDs if validation file is specified
+        # Compatible with KITTI evaluation scripts
+        pred_out_dir = os.path.join(output_dir, "pred_labels")
+        os.makedirs(pred_out_dir, exist_ok=True)
+
+        if gt_3d_dir is not None:
+            gt_out_dir = os.path.join(output_dir, "gt_labels")
+            os.makedirs(gt_out_dir, exist_ok=True)
+
+        # Validation frame filter: if provided, only process frames listed in this file
         allowed_frame_ids = None
         if val_frames_file is not None:
             if os.path.exists(val_frames_file):
@@ -80,17 +75,26 @@ class FastCLOCsEvaluator:
         )
 
         processed_count = 0
+        copied_gt_count = 0
+
         for filepath in frame_files:
             filename = os.path.basename(filepath)
             frame_id = os.path.splitext(filename)[0]
-            
+
+            # Copy Ground Truth files to the experiment structure if gt_3d_dir is provided
+            if gt_3d_dir is not None:
+                src_gt = os.path.join(gt_3d_dir, filename)
+                dst_gt = os.path.join(gt_out_dir, filename)
+                if os.path.exists(src_gt):
+                    shutil.copy(src_gt, dst_gt)
+                    copied_gt_count += 1
+
             preds_3d = dataset_parser._parse_3d_file(filepath)
             preds_2d = dataset_parser._parse_2d_file(os.path.join(pred_2d_dir, filename))
             
-            out_filepath = os.path.join(output_dir, filename)
+            out_filepath = os.path.join(pred_out_dir, filename)
             
             if not preds_3d:
-                # Create empty file if no 3D predictions exist
                 open(out_filepath, 'w').close()
                 processed_count += 1
                 continue
@@ -98,7 +102,6 @@ class FastCLOCsEvaluator:
             updated_lines = []
             
             for b3d in preds_3d:
-                # Find matching 2D candidates
                 best_2d_score = 0.0
                 best_iou_2d = 0.0
                 
@@ -109,7 +112,6 @@ class FastCLOCsEvaluator:
                             best_iou_2d = iou
                             best_2d_score = b2d['score']
 
-                # Build input feature tensor
                 vol = b3d['dim'][0] * b3d['dim'][1] * b3d['dim'][2]
                 one_hot = [0.0, 0.0, 0.0]
                 one_hot[b3d['class_idx']] = 1.0
@@ -124,13 +126,10 @@ class FastCLOCsEvaluator:
 
                 feat_tensor = torch.tensor([feat_vector], dtype=torch.float32).to(self.device)
 
-                # Neural Network Inference
                 with torch.no_grad():
                     learned_score = self.model(feat_tensor).item()
 
-                # Filter predictions below final cutoff threshold
                 if learned_score >= conf_thresh:
-                    # Reconstruct KITTI format string with updated learned score
                     b2d_str = " ".join([f"{p:.2f}" for p in b3d['bbox_2d']])
                     dim_str = " ".join([f"{p:.2f}" for p in b3d['dim']])
                     loc_str = " ".join([f"{p:.2f}" for p in b3d['loc']])
@@ -141,22 +140,9 @@ class FastCLOCsEvaluator:
                     )
                     updated_lines.append(line)
 
-            # Write updated predictions to file
             with open(out_filepath, 'w') as f:
                 f.writelines(updated_lines)
                 
             processed_count += 1
 
-        print(f"Inference complete. Processed {processed_count} frames -> Output saved to: {output_dir}")
-
-
-if __name__ == "__main__":
-    # Example inference run on 16-beam degraded regime using validation frame filter
-    evaluator = FastCLOCsEvaluator(model_path="models_checkpoints/fast_cloc_best.pth")
-    evaluator.run_inference(
-        pred_3d_dir="experiments/beam_16rings",
-        pred_2d_dir="experiments_camera/yolov8m_baseline_2d",
-        output_dir="experiments_fastcloc/fusion_beam_16rings",
-        val_frames_file="models_checkpoints/val_frames.txt",
-        conf_thresh=0.15
-    )
+        print(f"Inference complete. Processed {processed_count} frames | Copied {copied_gt_count} GT files -> Output saved to: {output_dir}")
