@@ -52,35 +52,35 @@ class FastCLOCsDataset(Dataset):
         return iou
 
     def _parse_3d_file(self, filepath):
-        """Parses KITTI 3D prediction or Ground Truth text files."""
         boxes = []
         if not os.path.exists(filepath):
             return boxes
         
         with open(filepath, 'r') as f:
-            for line in f.readlines():
+            for line in f:
                 parts = line.strip().split()
-                if not parts or parts[0] == 'DontCare':
+                if not parts or parts[0] not in self.class_map:
                     continue
                 
+                # Standard KITTI fields extraction
                 cls_name = parts[0]
-                if cls_name not in self.class_map:
-                    continue
-                
-                # KITTI Format: class, truncated, occluded, alpha, 2d_bbox (4), 3d_dim (3), 3d_loc (3), rotation_y, score
-                bbox_2d = [float(p) for p in parts[4:8]]
-                h, w, l = float(parts[8]), float(parts[9]), float(parts[10])
-                x, y, z = float(parts[11]), float(parts[12]), float(parts[13])
-                score = float(parts[14]) if len(parts) > 14 else 1.0
-                
+                alpha = float(parts[3]) if len(parts) > 3 else 0.0
+                bbox_2d = [float(x) for x in parts[4:8]] if len(parts) >= 8 else [0.0, 0.0, 0.0, 0.0]
+                dim = [float(x) for x in parts[8:11]]    # [h, w, l]
+                loc = [float(x) for x in parts[11:14]]   # [x, y, z]
+                ry = float(parts[14]) if len(parts) > 14 else 0.0
+                score = float(parts[15]) if len(parts) > 15 else float(parts[-1])
+
                 boxes.append({
                     'class': cls_name,
                     'class_idx': self.class_map[cls_name],
+                    'alpha': alpha,
                     'bbox_2d': bbox_2d,
-                    'dim': [h, w, l],
-                    'loc': [x, y, z],
-                    'depth': z,
-                    'score': score
+                    'dim': dim,
+                    'loc': loc,
+                    'ry': ry,
+                    'score': score,
+                    'depth': loc[2]
                 })
         return boxes
 

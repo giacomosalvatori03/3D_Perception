@@ -134,9 +134,12 @@ class FastCLOCsEvaluator:
                     dim_str = " ".join([f"{p:.2f}" for p in b3d['dim']])
                     loc_str = " ".join([f"{p:.2f}" for p in b3d['loc']])
                     
+                    alpha = b3d.get('alpha', 0.00)
+                    ry = b3d.get('ry', 0.00)
+
                     line = (
-                        f"{b3d['class']} 0.00 0 0.00 {b2d_str} "
-                        f"{dim_str} {loc_str} 0.00 {learned_score:.4f}\n"
+                        f"{b3d['class']} 0.00 0 {alpha:.2f} {b2d_str} "
+                        f"{dim_str} {loc_str} {ry:.2f} {learned_score:.4f}\n"
                     )
                     updated_lines.append(line)
 
