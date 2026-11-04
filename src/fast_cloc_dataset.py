@@ -124,7 +124,7 @@ class FastCLOCsDataset(Dataset):
                 y_label = 0.0
                 for gt in gts_3d:
                     if gt['class'] == b3d['class']:
-                        dist = np.linalg_norm(np.array(b3d['loc']) - np.array(gt['loc']))
+                        dist = np.linalg.norm(np.array(b3d['loc']) - np.array(gt['loc']))
                         if dist < 1.5:  # Spatial distance threshold for positive match
                             y_label = 1.0
                             break
