@@ -104,13 +104,15 @@ class FastCLOCsEvaluator:
             for b3d in preds_3d:
                 best_2d_score = 0.0
                 best_iou_2d = 0.0
-                
+                best_2d_bbox = b3d['bbox_2d']  # Default fallback
+
                 for b2d in preds_2d:
                     if b2d['class'] == b3d['class']:
                         iou = dataset_parser._compute_2d_iou(b3d['bbox_2d'], b2d['bbox_2d'])
                         if iou > best_iou_2d:
                             best_iou_2d = iou
                             best_2d_score = b2d['score']
+                            best_2d_bbox = b2d['bbox_2d']  
 
                 vol = b3d['dim'][0] * b3d['dim'][1] * b3d['dim'][2]
                 one_hot = [0.0, 0.0, 0.0]
@@ -130,7 +132,8 @@ class FastCLOCsEvaluator:
                     learned_score = self.model(feat_tensor).item()
 
                 if learned_score >= conf_thresh:
-                    b2d_str = " ".join([f"{p:.2f}" for p in b3d['bbox_2d']])
+                    # Use the actual 2D BBox (best_2d_bbox) for KITTI line formatting
+                    b2d_str = " ".join([f"{p:.2f}" for p in best_2d_bbox])
                     dim_str = " ".join([f"{p:.2f}" for p in b3d['dim']])
                     loc_str = " ".join([f"{p:.2f}" for p in b3d['loc']])
                     
