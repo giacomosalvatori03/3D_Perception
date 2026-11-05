@@ -74,10 +74,10 @@ class ConfusionMatrix3D:
 
         # Corners relative to center
         corners = np.array([
-            [l / 2, w / 2],
-            [l / 2, -w / 2],
-            [-l / 2, -w / 2],
-            [-l / 2, w / 2],
+            [w / 2, l / 2],
+            [w / 2, -l / 2],
+            [-w / 2, -l / 2],
+            [-w / 2, l / 2],
         ])
 
         # Rotation matrix around Y axis
