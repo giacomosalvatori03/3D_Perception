@@ -2,6 +2,7 @@ import os
 import glob
 import shutil
 import torch
+import shapely
 import numpy as np
 
 from src.fast_cloc_model import FastCLOCsAligner
@@ -78,6 +79,90 @@ class FastCLOCsEvaluator:
         
         return [xmin, ymin, xmax, ymax]
 
+    def _get_bev_box(self, loc, dim, ry):
+        """
+        Compute the 4 corners of the 2D footprint in BEV (X-Z plane).
+        loc: [x, y, z], dim: [h, w, l], ry: rotation_y in radians.
+        """
+        x, _, z = loc
+        _, w, l = dim
+        
+        # Vertex in the object reference frame (X-Z plane)
+        corners = np.array([
+            [ l/2,  w/2],
+            [ l/2, -w/2],
+            [-l/2, -w/2],
+            [-l/2,  w/2]
+        ])
+        
+        # Rotation around the Y-axis in the X-Z plane
+        R = np.array([
+            [np.cos(ry), np.sin(ry)],
+            [-np.sin(ry), np.cos(ry)]
+        ])
+        
+        # Translation in the center of the object (x, z)
+        rotated_corners = np.dot(corners, R) + np.array([x, z])
+        return rotated_corners
+
+    def _compute_bev_iou(self, boxA, boxB):
+        """Compute the BEV IoU between two 3D bounding boxes."""
+        try:
+            from shapely.geometry import Polygon
+            polyA = Polygon(self._get_bev_box(boxA['loc'], boxA['dim'], boxA['ry']))
+            polyB = Polygon(self._get_bev_box(boxB['loc'], boxB['dim'], boxB['ry']))
+            
+            if not polyA.is_valid or not polyB.is_valid:
+                return 0.0
+                
+            inter = polyA.intersection(polyB).area
+            union = polyA.area + polyB.area - inter
+            return float(inter / max(union, 1e-6))
+        except ImportError:
+            # Fallback (axis-aligned BEV IoU) if shapely is not available
+            h_a, w_a, l_a = boxA['dim']
+            h_b, w_b, l_b = boxB['dim']
+            
+            x1_a, x2_a = boxA['loc'][0] - l_a / 2, boxA['loc'][0] + l_a / 2
+            z1_a, z2_a = boxA['loc'][2] - w_a / 2, boxA['loc'][2] + w_a / 2
+            
+            x1_b, x2_b = boxB['loc'][0] - l_b / 2, boxB['loc'][0] + l_b / 2
+            z1_b, z2_b = boxB['loc'][2] - w_b / 2, boxB['loc'][2] + w_b / 2
+            
+            inter_x = max(0.0, min(x2_a, x2_b) - max(x1_a, x1_b))
+            inter_z = max(0.0, min(z2_a, z2_b) - max(z1_a, z1_b))
+            inter = inter_x * inter_z
+            
+            areaA = l_a * w_a
+            areaB = l_b * w_b
+            return float(inter / max(areaA + areaB - inter, 1e-6))
+
+    def _apply_3d_nms(self, candidates, nms_thresh=0.25):
+        """Apply Non-Maximum Suppression (NMS) in BEV for each class separately."""
+        if not candidates:
+            return []
+
+        # Sorting candidates by learned_score in descending order
+        sorted_candidates = sorted(candidates, key=lambda c: c['learned_score'], reverse=True)
+        keep = []
+
+        while len(sorted_candidates) > 0:
+            current = sorted_candidates.pop(0)
+            keep.append(current)
+
+            remaining = []
+            for item in sorted_candidates:
+                # NMS is applied only to candidates of the same class
+                if item['class'] == current['class']:
+                    iou_bev = self._compute_bev_iou(current, item)
+                    if iou_bev < nms_thresh:
+                        remaining.append(item)
+                else:
+                    remaining.append(item)
+            sorted_candidates = remaining
+
+        return keep
+
     def run_inference(
         self,
         pred_3d_dir: str,
@@ -86,7 +171,8 @@ class FastCLOCsEvaluator:
         gt_3d_dir: str = None,
         calib_dir: str = None,
         val_frames_file: str = None,
-        conf_thresh: float = 0.01
+        conf_thresh: float = 0.01,
+        nms_thresh: float = 0.25  
     ):
         pred_out_dir = os.path.join(output_dir, "pred_labels")
         os.makedirs(pred_out_dir, exist_ok=True)
@@ -96,13 +182,10 @@ class FastCLOCsEvaluator:
             os.makedirs(gt_out_dir, exist_ok=True)
 
         allowed_frame_ids = None
-        if val_frames_file is not None:
-            if os.path.exists(val_frames_file):
-                with open(val_frames_file, "r") as f:
-                    allowed_frame_ids = set(line.strip() for line in f.readlines() if line.strip())
-                print(f"Filtering evaluation to {len(allowed_frame_ids)} validation frames specified in: {val_frames_file}")
-            else:
-                print(f"Warning: Specified val_frames_file '{val_frames_file}' not found. Processing all available frames.")
+        if val_frames_file is not None and os.path.exists(val_frames_file):
+            with open(val_frames_file, "r") as f:
+                allowed_frame_ids = set(line.strip() for line in f.readlines() if line.strip())
+            print(f"Filtering evaluation to {len(allowed_frame_ids)} validation frames specified in: {val_frames_file}")
 
         all_frame_files = sorted(glob.glob(os.path.join(pred_3d_dir, "*.txt")))
         
@@ -117,17 +200,17 @@ class FastCLOCsEvaluator:
         dataset_parser = FastCLOCsDataset(
             pred_3d_dir=pred_3d_dir,
             pred_2d_dir=pred_2d_dir,
-            gt_3d_dir=pred_3d_dir,
+            gt_3d_dir=gt_3d_dir,
             calib_dir=calib_dir 
         )
 
         copied_gt_count = 0
         processed_count = 0
+        
         for filepath in frame_files:
             filename = os.path.basename(filepath)
             frame_id = os.path.splitext(filename)[0]
 
-            # Copy GT files to output directory if gt_3d_dir is provided
             if gt_3d_dir is not None:
                 src_gt = os.path.join(gt_3d_dir, filename)
                 dst_gt = os.path.join(gt_out_dir, filename)
@@ -135,9 +218,7 @@ class FastCLOCsEvaluator:
                     shutil.copy(src_gt, dst_gt)
                     copied_gt_count += 1
 
-            # 1. Load the P2 matrix using dataset_parser
             P2 = dataset_parser._load_p2_matrix(frame_id)
-
             preds_3d = dataset_parser._parse_3d_file(filepath)
             preds_2d = dataset_parser._parse_2d_file(os.path.join(pred_2d_dir, filename))
             
@@ -148,10 +229,9 @@ class FastCLOCsEvaluator:
                 processed_count += 1
                 continue
 
-            updated_lines = []
-            
+            frame_candidates = []
+
             for b3d in preds_3d:
-                # 2. Project the 3D box using dataset_parser directly
                 proj_2d_bbox = dataset_parser._project_3d_to_2d(b3d['loc'], b3d['dim'], b3d['ry'], P2)
                 
                 best_2d_score = 0.0
@@ -166,7 +246,6 @@ class FastCLOCsEvaluator:
                             best_2d_score = b2d['score']
                             best_2d_bbox = b2d['bbox_2d']
 
-                # 3. Construct feature tensor and run through Fast-CLOCs model
                 vol = b3d['dim'][0] * b3d['dim'][1] * b3d['dim'][2]
                 one_hot = [0.0, 0.0, 0.0]
                 one_hot[b3d['class_idx']] = 1.0
@@ -185,18 +264,29 @@ class FastCLOCsEvaluator:
                     learned_score = self.model(feat_tensor).item()
 
                 if learned_score >= conf_thresh:
-                    b2d_str = " ".join([f"{p:.2f}" for p in best_2d_bbox])
-                    dim_str = " ".join([f"{p:.2f}" for p in b3d['dim']])
-                    loc_str = " ".join([f"{p:.2f}" for p in b3d['loc']])
-                    
-                    alpha = b3d.get('alpha', 0.00)
-                    ry = b3d.get('ry', 0.00)
+                    candidate_dict = b3d.copy()
+                    candidate_dict['learned_score'] = learned_score
+                    candidate_dict['best_2d_bbox'] = best_2d_bbox
+                    frame_candidates.append(candidate_dict)
 
-                    line = (
-                        f"{b3d['class']} 0.00 0 {alpha:.2f} {b2d_str} "
-                        f"{dim_str} {loc_str} {ry:.2f} {learned_score:.4f}\n"
-                    )
-                    updated_lines.append(line)
+            # 1. Apply 3D NMS in BEV on candidates filtered by confidence threshold
+            filtered_candidates = self._apply_3d_nms(frame_candidates, nms_thresh=nms_thresh)
+
+            # 2. Format and save the predictions kept after NMS
+            updated_lines = []
+            for item in filtered_candidates:
+                b2d_str = " ".join([f"{p:.2f}" for p in item['best_2d_bbox']])
+                dim_str = " ".join([f"{p:.2f}" for p in item['dim']])
+                loc_str = " ".join([f"{p:.2f}" for p in item['loc']])
+                
+                alpha = item.get('alpha', 0.00)
+                ry = item.get('ry', 0.00)
+
+                line = (
+                    f"{item['class']} 0.00 0 {alpha:.2f} {b2d_str} "
+                    f"{dim_str} {loc_str} {ry:.2f} {item['learned_score']:.4f}\n"
+                )
+                updated_lines.append(line)
 
             with open(out_filepath, 'w') as f:
                 f.writelines(updated_lines)
