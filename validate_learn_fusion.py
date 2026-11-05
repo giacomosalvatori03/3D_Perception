@@ -261,7 +261,8 @@ class FastCLOCsEvaluator:
                 feat_tensor = torch.tensor([feat_vector], dtype=torch.float32).to(self.device)
 
                 with torch.no_grad():
-                    learned_score = self.model(feat_tensor).item()
+                    logits = self.model(feat_tensor)
+                    learned_score = torch.sigmoid(logits).item()  # Apply Sigmoid to get probability
 
                 if learned_score >= conf_thresh:
                     candidate_dict = b3d.copy()
