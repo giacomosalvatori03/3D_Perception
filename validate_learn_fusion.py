@@ -117,16 +117,15 @@ class FastCLOCsEvaluator:
         dataset_parser = FastCLOCsDataset(
             pred_3d_dir=pred_3d_dir,
             pred_2d_dir=pred_2d_dir,
-            gt_3d_dir=pred_3d_dir
+            gt_3d_dir=pred_3d_dir,
+            calib_dir=calib_dir 
         )
-
-        processed_count = 0
-        copied_gt_count = 0
 
         for filepath in frame_files:
             filename = os.path.basename(filepath)
             frame_id = os.path.splitext(filename)[0]
 
+            # Copy GT files to output directory if gt_3d_dir is provided
             if gt_3d_dir is not None:
                 src_gt = os.path.join(gt_3d_dir, filename)
                 dst_gt = os.path.join(gt_out_dir, filename)
@@ -134,9 +133,8 @@ class FastCLOCsEvaluator:
                     shutil.copy(src_gt, dst_gt)
                     copied_gt_count += 1
 
-            # Load P2 matrix for the current frame
-            calib_filepath = os.path.join(calib_dir, f"{frame_id}.txt") if calib_dir else None
-            P2 = self._load_p2_matrix(calib_filepath)
+            # 1. Load the P2 matrix using dataset_parser
+            P2 = dataset_parser._load_p2_matrix(frame_id)
 
             preds_3d = dataset_parser._parse_3d_file(filepath)
             preds_2d = dataset_parser._parse_2d_file(os.path.join(pred_2d_dir, filename))
@@ -151,14 +149,13 @@ class FastCLOCsEvaluator:
             updated_lines = []
             
             for b3d in preds_3d:
-                # 1. Project the 3D box into the 2D image space
-                proj_2d_bbox = self._project_3d_to_2d(b3d['loc'], b3d['dim'], b3d['ry'], P2)
+                # 2. Project the 3D box using dataset_parser directly
+                proj_2d_bbox = dataset_parser._project_3d_to_2d(b3d['loc'], b3d['dim'], b3d['ry'], P2)
                 
                 best_2d_score = 0.0
                 best_iou_2d = 0.0
-                best_2d_bbox = proj_2d_bbox  # Fallback
+                best_2d_bbox = proj_2d_bbox
 
-                # 2. Compute IoU between projected 3D box and YOLO 2D predictions
                 for b2d in preds_2d:
                     if b2d['class'] == b3d['class']:
                         iou = dataset_parser._compute_2d_iou(proj_2d_bbox, b2d['bbox_2d'])
@@ -167,7 +164,7 @@ class FastCLOCsEvaluator:
                             best_2d_score = b2d['score']
                             best_2d_bbox = b2d['bbox_2d']
 
-                # 3. Construct feature vector for Fast-CLOCs
+                # 3. Construct feature tensor and run through Fast-CLOCs model
                 vol = b3d['dim'][0] * b3d['dim'][1] * b3d['dim'][2]
                 one_hot = [0.0, 0.0, 0.0]
                 one_hot[b3d['class_idx']] = 1.0

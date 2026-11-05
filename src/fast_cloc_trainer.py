@@ -21,6 +21,7 @@ class FastCLOCsTrainer:
         pred_3d_dir: str,
         pred_2d_dir: str,
         gt_3d_dir: str,
+        calib_dir: str = None,
         output_checkpoint_dir: str = "models_checkpoints",
         batch_size: int = 256,
         epochs: int = 30,
@@ -34,6 +35,7 @@ class FastCLOCsTrainer:
             pred_3d_dir (str): Path to 3D candidate predictions.
             pred_2d_dir (str): Path to 2D candidate predictions.
             gt_3d_dir (str): Path to 3D Ground Truth annotations.
+            calib_dir (str): Path to calibration files.
             output_checkpoint_dir (str): Directory to save model checkpoints and frame split logs.
             batch_size (int): Mini-batch size for training.
             epochs (int): Number of training epochs.
@@ -98,6 +100,7 @@ class FastCLOCsTrainer:
             pred_3d_dir=pred_3d_dir,
             pred_2d_dir=pred_2d_dir,
             gt_3d_dir=gt_3d_dir,
+            calib_dir=calib_dir,
             frame_ids=train_frame_ids
         )
 
@@ -106,6 +109,7 @@ class FastCLOCsTrainer:
             pred_3d_dir=pred_3d_dir,
             pred_2d_dir=pred_2d_dir,
             gt_3d_dir=gt_3d_dir,
+            calib_dir=calib_dir,
             frame_ids=val_frame_ids
         )
 
