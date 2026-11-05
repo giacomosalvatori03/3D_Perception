@@ -121,6 +121,8 @@ class FastCLOCsEvaluator:
             calib_dir=calib_dir 
         )
 
+        copied_gt_count = 0
+        processed_count = 0
         for filepath in frame_files:
             filename = os.path.basename(filepath)
             frame_id = os.path.splitext(filename)[0]
