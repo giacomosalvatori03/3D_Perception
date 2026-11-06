@@ -25,7 +25,7 @@ class FastCLOCsTrainer:
         batch_size: int = 256,
         epochs: int = 35,
         lr: float = 0.001,
-        pos_weight_val: float = 4.0,  # Penalize false positives more heavily to address class imbalance
+        pos_weight_val: float = 1.5,
         val_split: float = 0.2,
         seed: int = 42,
         device: str = None
