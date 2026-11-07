@@ -3,18 +3,30 @@ import glob
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+from shapely.geometry import Polygon
+
 
 class FastCLOCsDataset(Dataset):
-    """PyTorch Dataset for extracting 2D-3D feature vectors using the P2 projection for correct 2D-3D geometric association."""
-    def __init__(self, pred_3d_dir, pred_2d_dir, gt_3d_dir, frame_ids=None, calib_dir=None, iou_match_thresh=0.5):
+    """
+    PyTorch Dataset for extracting 2D-3D feature vectors using P2 projection 
+    and BEV IoU target labeling for Fast-CLOCs score alignment.
+    """
+    def __init__(self, pred_3d_dir, pred_2d_dir, gt_3d_dir, frame_ids=None, calib_dir=None, iou_match_thresh=None):
         self.pred_3d_dir = pred_3d_dir
         self.pred_2d_dir = pred_2d_dir
         self.gt_3d_dir = gt_3d_dir
         self.calib_dir = calib_dir
-        self.iou_match_thresh = iou_match_thresh
+        
+        # IoU thresholds for BEV matching to assign positive labels (y=1)
+        self.iou_match_thresh = iou_match_thresh or {
+            "Car": 0.50,
+            "Pedestrian": 0.25,
+            "Cyclist": 0.25,
+            "default": 0.25
+        }
+        
         self.class_map = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
         
-        # Standard KITTI P2 matrix (fallback if calib_dir is not provided)
         self.default_P2 = np.array([
             [721.5377, 0.0, 609.5593, 44.85728],
             [0.0, 721.5377, 172.8540, 0.2163761],
@@ -32,7 +44,6 @@ class FastCLOCsDataset(Dataset):
         self.features, self.labels = self._build_candidate_pairs()
 
     def _load_p2_matrix(self, frame_id):
-        """Load the P2 matrix from the calibration file for the given frame."""
         if self.calib_dir:
             calib_filepath = os.path.join(self.calib_dir, f"{frame_id}.txt")
             if os.path.exists(calib_filepath):
@@ -43,7 +54,6 @@ class FastCLOCsDataset(Dataset):
         return self.default_P2
 
     def _project_3d_to_2d(self, loc, dim, ry, P2):
-        """Project a 3D box into the 2D image plane."""
         h, w, l = dim
         x, y, z = loc
         
@@ -83,6 +93,32 @@ class FastCLOCsDataset(Dataset):
         boxBArea = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
 
         return interArea / float(boxAArea + boxBArea - interArea + 1e-6)
+
+    def _compute_bev_iou(self, boxA, boxB):
+        """Computes the real BEV IoU between two 3D boxes for correct GT label assignment."""
+        try:
+            x_a, _, z_a = boxA['loc']
+            _, w_a, l_a = boxA['dim']
+            ry_a = boxA['ry']
+            corners_a = np.array([[w_a/2, l_a/2], [w_a/2, -l_a/2], [-w_a/2, -l_a/2], [-w_a/2, l_a/2]])
+            R_a = np.array([[np.cos(ry_a), np.sin(ry_a)], [-np.sin(ry_a), np.cos(ry_a)]])
+            polyA = Polygon(np.dot(corners_a, R_a) + np.array([x_a, z_a]))
+
+            x_b, _, z_b = boxB['loc']
+            _, w_b, l_b = boxB['dim']
+            ry_b = boxB['ry']
+            corners_b = np.array([[w_b/2, l_b/2], [w_b/2, -l_b/2], [-w_b/2, -l_b/2], [-w_b/2, l_b/2]])
+            R_b = np.array([[np.cos(ry_b), np.sin(ry_b)], [-np.sin(ry_b), np.cos(ry_b)]])
+            polyB = Polygon(np.dot(corners_b, R_b) + np.array([x_b, z_b]))
+
+            if not polyA.is_valid or not polyB.is_valid:
+                return 0.0
+
+            inter = polyA.intersection(polyB).area
+            union = polyA.area + polyB.area - inter
+            return float(inter / max(union, 1e-6))
+        except Exception:
+            return 0.0
 
     def _parse_3d_file(self, filepath):
         boxes = []
@@ -152,48 +188,44 @@ class FastCLOCsDataset(Dataset):
             P2 = self._load_p2_matrix(frame_id)
 
             for b3d in preds_3d:
-                # 1. Compute GT label (1.0 if the 3D box is within 1.5m of a GT of the same class)
+                # 1. Determining target label y based on real 3D/BEV IoU with Ground Truth
                 y_label = 0.0
+                req_thresh = self.iou_match_thresh.get(b3d['class'], self.iou_match_thresh["default"])
                 for gt in gts_3d:
                     if gt['class'] == b3d['class']:
-                        dist = np.linalg.norm(np.array(b3d['loc']) - np.array(gt['loc']))
-                        if dist < 1.5:
+                        bev_iou = self._compute_bev_iou(b3d, gt)
+                        if bev_iou >= req_thresh:
                             y_label = 1.0
                             break
 
-                # 2. Project 3D -> 2D in the camera plane
+                # 2. Projecting 3D box to 2D camera plane using P2 matrix
                 proj_2d_bbox = self._project_3d_to_2d(b3d['loc'], b3d['dim'], b3d['ry'], P2)
 
-                # 3. Match with YOLO 2D predictions using proj_2d_bbox
-                matched_2d = False
+                # 3. Find the BEST 2D match (aligned with inference)
+                best_2d_score = 0.0
+                best_iou_2d = 0.0
+
                 for b2d in preds_2d:
                     if b2d['class'] == b3d['class']:
                         iou_2d = self._compute_2d_iou(proj_2d_bbox, b2d['bbox_2d'])
-                        
-                        if iou_2d > 0.01:
-                            vol = b3d['dim'][0] * b3d['dim'][1] * b3d['dim'][2]
-                            one_hot = [0.0, 0.0, 0.0]
-                            one_hot[b3d['class_idx']] = 1.0
+                        if iou_2d > best_iou_2d:
+                            best_iou_2d = iou_2d
+                            best_2d_score = b2d['score']
 
-                            feat = [
-                                b3d['score'],
-                                b2d['score'],
-                                iou_2d,
-                                b3d['depth'],
-                                vol
-                            ] + one_hot
+                vol = b3d['dim'][0] * b3d['dim'][1] * b3d['dim'][2]
+                one_hot = [0.0, 0.0, 0.0]
+                one_hot[b3d['class_idx']] = 1.0
 
-                            all_features.append(feat)
-                            all_labels.append([y_label])
-                            matched_2d = True
+                feat = [
+                    b3d['score'],
+                    best_2d_score,
+                    best_iou_2d,
+                    b3d['depth'],
+                    vol
+                ] + one_hot
 
-                if not matched_2d:
-                    vol = b3d['dim'][0] * b3d['dim'][1] * b3d['dim'][2]
-                    one_hot = [0.0, 0.0, 0.0]
-                    one_hot[b3d['class_idx']] = 1.0
-                    feat = [b3d['score'], 0.0, 0.0, b3d['depth'], vol] + one_hot
-                    all_features.append(feat)
-                    all_labels.append([y_label])
+                all_features.append(feat)
+                all_labels.append([y_label])
 
         if not all_features:
             return torch.empty((0, 8), dtype=torch.float32), torch.empty((0, 1), dtype=torch.float32)

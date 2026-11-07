@@ -2,7 +2,6 @@ import os
 import glob
 import shutil
 import torch
-import shapely
 import numpy as np
 
 from src.fast_cloc_model import FastCLOCsAligner
@@ -11,9 +10,7 @@ from src.fast_cloc_dataset import FastCLOCsDataset
 
 class FastCLOCsEvaluator:
     """
-    Inference engine for Fast-CLOCs.
-    Loads trained weights, projects 3D candidate bounding boxes into 2D image coordinates,
-    computes accurate 2D/3D IoU with YOLO predictions, and updates KITTI prediction text files.
+    Inference engine for Fast-CLOCs with accurate 3D BEV NMS post-processing.
     """
     def __init__(self, model_path: str, device: str = None):
         if device is None:
@@ -27,7 +24,6 @@ class FastCLOCsEvaluator:
         
         self.class_map = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
      
-        # P2 standard KITTI used as a fallback if calib file is not specified
         self.default_P2 = np.array([
             [721.5377, 0.0, 609.5593, 44.85728],
             [0.0, 721.5377, 172.8540, 0.2163761],
@@ -35,78 +31,30 @@ class FastCLOCsEvaluator:
         ])
         print(f"FastCLOCsEvaluator initialized with weights from: {model_path}")
 
-    def _load_p2_matrix(self, calib_filepath: str):
-        """Loads the P2 matrix from the KITTI calibration file if available."""
-        if calib_filepath and os.path.exists(calib_filepath):
-            with open(calib_filepath, 'r') as f:
-                for line in f:
-                    if line.startswith("P2:"):
-                        return np.array([float(x) for x in line.strip().split()[1:]]).reshape(3, 4)
-        return self.default_P2
-
-    def _project_3d_to_2d(self, loc, dim, ry, P2):
-        """Projects a 3D bounding box (loc, dim, ry) into the 2D image plane [xmin, ymin, xmax, ymax]."""
-        h, w, l = dim
-        x, y, z = loc
-        
-        # Vertices of 3D bounding box in the object coordinate system
-        x_corners = [l/2, l/2, -l/2, -l/2, l/2, l/2, -l/2, -l/2]
-        y_corners = [0, 0, 0, 0, -h, -h, -h, -h]
-        z_corners = [w/2, -w/2, -w/2, w/2, w/2, -w/2, -w/2, w/2]
-        
-        # Rotation matrix around the Y-axis
-        R = np.array([
-            [np.cos(ry), 0, np.sin(ry)],
-            [0, 1, 0],
-            [-np.sin(ry), 0, np.cos(ry)]
-        ])
-        
-        corners_3d = np.vstack([x_corners, y_corners, z_corners])
-        corners_3d_cam = np.dot(R, corners_3d) + np.array([[x], [y], [z]])
-        
-        # Homogeneous coordinates for projection
-        corners_3d_hom = np.vstack([corners_3d_cam, np.ones((1, 8))])
-        
-        # 2D Projection using the P2 matrix
-        pts_2d = np.dot(P2, corners_3d_hom)
-        pts_2d[0, :] /= pts_2d[2, :]
-        pts_2d[1, :] /= pts_2d[2, :]
-        
-        xmin = float(np.min(pts_2d[0, :]))
-        xmax = float(np.max(pts_2d[0, :]))
-        ymin = float(np.min(pts_2d[1, :]))
-        ymax = float(np.max(pts_2d[1, :]))
-        
-        return [xmin, ymin, xmax, ymax]
-
     def _get_bev_box(self, loc, dim, ry):
         """
-        Compute the 4 corners of the 2D footprint in BEV (X-Z plane).
-        loc: [x, y, z], dim: [h, w, l], ry: rotation_y in radians.
+        Calculates the 4 vertices of the BEV footprint (X-Z plane).
+        Width (w) is associated with the X-axis, Length (l) is associated with the Z-axis (KITTI Camera 2).
         """
         x, _, z = loc
         _, w, l = dim
         
-        # Vertex in the object reference frame (X-Z plane)
         corners = np.array([
-            [ l/2,  w/2],
-            [ l/2, -w/2],
-            [-l/2, -w/2],
-            [-l/2,  w/2]
+            [ w/2,  l/2],
+            [ w/2, -l/2],
+            [-w/2, -l/2],
+            [-w/2,  l/2]
         ])
         
-        # Rotation around the Y-axis in the X-Z plane
         R = np.array([
             [np.cos(ry), np.sin(ry)],
             [-np.sin(ry), np.cos(ry)]
         ])
         
-        # Translation in the center of the object (x, z)
-        rotated_corners = np.dot(corners, R) + np.array([x, z])
-        return rotated_corners
+        return np.dot(corners, R) + np.array([x, z])
 
     def _compute_bev_iou(self, boxA, boxB):
-        """Compute the BEV IoU between two 3D bounding boxes."""
+        """Computes the BEV IoU between two 3D bounding boxes."""
         try:
             from shapely.geometry import Polygon
             polyA = Polygon(self._get_bev_box(boxA['loc'], boxA['dim'], boxA['ry']))
@@ -118,16 +66,15 @@ class FastCLOCsEvaluator:
             inter = polyA.intersection(polyB).area
             union = polyA.area + polyB.area - inter
             return float(inter / max(union, 1e-6))
-        except ImportError:
-            # Fallback (axis-aligned BEV IoU) if shapely is not available
-            h_a, w_a, l_a = boxA['dim']
-            h_b, w_b, l_b = boxB['dim']
+        except Exception:
+            _, w_a, l_a = boxA['dim']
+            _, w_b, l_b = boxB['dim']
             
-            x1_a, x2_a = boxA['loc'][0] - l_a / 2, boxA['loc'][0] + l_a / 2
-            z1_a, z2_a = boxA['loc'][2] - w_a / 2, boxA['loc'][2] + w_a / 2
+            x1_a, x2_a = boxA['loc'][0] - w_a / 2, boxA['loc'][0] + w_a / 2
+            z1_a, z2_a = boxA['loc'][2] - l_a / 2, boxA['loc'][2] + l_a / 2
             
-            x1_b, x2_b = boxB['loc'][0] - l_b / 2, boxB['loc'][0] + l_b / 2
-            z1_b, z2_b = boxB['loc'][2] - w_b / 2, boxB['loc'][2] + w_b / 2
+            x1_b, x2_b = boxB['loc'][0] - w_b / 2, boxB['loc'][0] + w_b / 2
+            z1_b, z2_b = boxB['loc'][2] - l_b / 2, boxB['loc'][2] + l_b / 2
             
             inter_x = max(0.0, min(x2_a, x2_b) - max(x1_a, x1_b))
             inter_z = max(0.0, min(z2_a, z2_b) - max(z1_a, z1_b))
@@ -138,11 +85,10 @@ class FastCLOCsEvaluator:
             return float(inter / max(areaA + areaB - inter, 1e-6))
 
     def _apply_3d_nms(self, candidates, nms_thresh=0.25):
-        """Apply Non-Maximum Suppression (NMS) in BEV for each class separately."""
+        """Applies BEV NMS per class to remove 3D duplicates."""
         if not candidates:
             return []
 
-        # Sorting candidates by learned_score in descending order
         sorted_candidates = sorted(candidates, key=lambda c: c['learned_score'], reverse=True)
         keep = []
 
@@ -152,7 +98,6 @@ class FastCLOCsEvaluator:
 
             remaining = []
             for item in sorted_candidates:
-                # NMS is applied only to candidates of the same class
                 if item['class'] == current['class']:
                     iou_bev = self._compute_bev_iou(current, item)
                     if iou_bev < nms_thresh:
@@ -197,11 +142,13 @@ class FastCLOCsEvaluator:
         else:
             frame_files = all_frame_files
 
+        # Light-weight dataset parser instantiation without loading pairs into memory
         dataset_parser = FastCLOCsDataset(
             pred_3d_dir=pred_3d_dir,
             pred_2d_dir=pred_2d_dir,
             gt_3d_dir=gt_3d_dir,
-            calib_dir=calib_dir 
+            calib_dir=calib_dir,
+            frame_ids=[]
         )
 
         copied_gt_count = 0
@@ -261,8 +208,7 @@ class FastCLOCsEvaluator:
                 feat_tensor = torch.tensor([feat_vector], dtype=torch.float32).to(self.device)
 
                 with torch.no_grad():
-                    logits = self.model(feat_tensor)
-                    learned_score = torch.sigmoid(logits).item()  # Apply Sigmoid to get probability
+                    learned_score = self.model(feat_tensor, return_logits=False).item()
 
                 if learned_score >= conf_thresh:
                     candidate_dict = b3d.copy()
@@ -270,10 +216,10 @@ class FastCLOCsEvaluator:
                     candidate_dict['best_2d_bbox'] = best_2d_bbox
                     frame_candidates.append(candidate_dict)
 
-            # 1. Apply 3D NMS in BEV on candidates filtered by confidence threshold
+            # 1. 3D NMS in BEV post-processing
             filtered_candidates = self._apply_3d_nms(frame_candidates, nms_thresh=nms_thresh)
 
-            # 2. Format and save the predictions kept after NMS
+            # 2. Writing filtered predictions
             updated_lines = []
             for item in filtered_candidates:
                 b2d_str = " ".join([f"{p:.2f}" for p in item['best_2d_bbox']])

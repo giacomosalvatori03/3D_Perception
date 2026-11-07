@@ -13,7 +13,7 @@ from src.fast_cloc_model import FastCLOCsAligner
 class FastCLOCsTrainer:
     """
     Trainer pipeline for the Fast-CLOCs score aligner network.
-    Uses positive class weighting to counteract 2D-3D candidate background imbalance.
+    Uses positive class weighting and tracks Precision/Recall/F1-score for validation.
     """
     def __init__(
         self,
@@ -97,7 +97,7 @@ class FastCLOCsTrainer:
         self.train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
         self.val_loader = DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False)
 
-        # Initialize model and balanced loss with pos_weight
+        # Model and Loss with weighted pos_weight
         self.model = FastCLOCsAligner(input_dim=8).to(self.device)
         
         pos_weight = torch.tensor([pos_weight_val]).to(self.device)
@@ -114,7 +114,7 @@ class FastCLOCsTrainer:
             labels = labels.to(self.device)
             
             self.optimizer.zero_grad()
-            logits = self.model(features)
+            logits = self.model(features, return_logits=True)
             loss = self.criterion(logits, labels)
             loss.backward()
             self.optimizer.step()
@@ -124,42 +124,50 @@ class FastCLOCsTrainer:
         return total_loss / max(1, len(self.train_loader.dataset))
 
     def validate(self) -> tuple:
+        """
+        Evaluates loss, accuracy, precision, recall, and F1-score on validation split.
+        """
         self.model.eval()
         total_loss = 0.0
-        correct_preds = 0
-        total_preds = 0
+        tp, fp, fn, tn = 0, 0, 0, 0
         
         with torch.no_grad():
             for features, labels in self.val_loader:
                 features = features.to(self.device)
                 labels = labels.to(self.device)
                 
-                logits = self.model(features)
+                logits = self.model(features, return_logits=True)
                 loss = self.criterion(logits, labels)
                 
                 total_loss += loss.item() * features.size(0)
                 
-                # Apply Sigmoid on Logits to compute validation accuracy
                 probs = torch.sigmoid(logits)
-                predicted_classes = (probs >= 0.5).float()
-                correct_preds += (predicted_classes == labels).sum().item()
-                total_preds += labels.size(0)
+                preds = (probs >= 0.5).float()
+                
+                tp += ((preds == 1) & (labels == 1)).sum().item()
+                fp += ((preds == 1) & (labels == 0)).sum().item()
+                fn += ((preds == 0) & (labels == 1)).sum().item()
+                tn += ((preds == 0) & (labels == 0)).sum().item()
                 
         val_loss = total_loss / max(1, len(self.val_loader.dataset))
-        val_acc = correct_preds / max(1, total_preds)
-        return val_loss, val_acc
+        val_acc = (tp + tn) / max(1, (tp + tn + fp + fn))
+        precision = tp / max(1, (tp + fp))
+        recall = tp / max(1, (tp + fn))
+        f1_score = 2 * (precision * recall) / max(1e-6, (precision + recall))
+        
+        return val_loss, val_acc, precision, recall, f1_score
 
     def fit(self):
-        best_val_loss = float("inf")
+        best_f1 = -1.0
         best_model_path = os.path.join(self.output_checkpoint_dir, "fast_cloc_best.pth")
         
         print("\n--- Starting Fast-CLOCs Training Loop ---")
         for epoch in range(1, self.epochs + 1):
             train_loss = self.train_epoch()
-            val_loss, val_acc = self.validate()
+            val_loss, val_acc, precision, recall, f1 = self.validate()
             
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
+            if f1 > best_f1:
+                best_f1 = f1
                 torch.save(self.model.state_dict(), best_model_path)
                 saved_status = "[BEST SAVED]"
             else:
@@ -169,6 +177,9 @@ class FastCLOCsTrainer:
                 print(f"Epoch {epoch:02d}/{self.epochs:02d} | "
                       f"Train Loss: {train_loss:.4f} | "
                       f"Val Loss: {val_loss:.4f} | "
-                      f"Val Acc: {val_acc * 100:.2f}% {saved_status}")
+                      f"Acc: {val_acc*100:.1f}% | "
+                      f"Prec: {precision*100:.1f}% | "
+                      f"Rec: {recall*100:.1f}% | "
+                      f"F1: {f1*100:.1f}% {saved_status}")
                 
-        print(f"\nTraining complete. Best model checkpoint saved to: {best_model_path}")
+        print(f"\nTraining complete. Best model checkpoint (F1={best_f1*100:.2f}%) saved to: {best_model_path}")
