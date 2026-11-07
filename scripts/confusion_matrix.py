@@ -1,6 +1,6 @@
 import glob
 import os
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 from shapely.geometry import Polygon
