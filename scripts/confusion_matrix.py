@@ -198,7 +198,8 @@ class ConfusionMatrix3D:
 
         if normalize:
             plot_matrix = matrix.astype(np.float32).copy()
-            # Normalize the first 3 rows (GT) with respect to the total GT per row
+            
+            # 1. Row normalization for the first 3 rows (GT -> Recall breakdown)
             for i in range(self.num_classes):
                 total_gt = matrix[i, :].sum()
                 if total_gt > 0:
@@ -206,7 +207,14 @@ class ConfusionMatrix3D:
                 else:
                     plot_matrix[i, :] = 0.0
 
-            # Normalize the last row (Background) with respect to the total predictions per column
+            # 2. Column normalization for the last row (Background -> FDR breakdown)
+            for j in range(self.num_classes):
+                total_preds = matrix[:, j].sum()  # TP_j + FP_j
+                if total_preds > 0:
+                    plot_matrix[self.num_classes, j] = (matrix[self.num_classes, j] / total_preds) * 100.0
+                else:
+                    plot_matrix[self.num_classes, j] = 0.0
+
             fmt = ".1f"
             cbar_label = "Percentage (%)"
         else:
@@ -229,13 +237,19 @@ class ConfusionMatrix3D:
         for i in range(plot_matrix.shape[0]):
             for j in range(plot_matrix.shape[1]):
                 val = plot_matrix[i, j]
-                text_str = f"{val:{fmt}}" + ("%" if normalize and i < self.num_classes else "")
-                plt.text(
-                    j, i, text_str,
-                    ha="center", va="center",
-                    color="white" if val > thresh else "black",
-                    fontsize=10, fontweight="bold"
-                )
+                # Add the '%' symbol to all valid cells in normalized mode
+                if normalize:
+                    text_str = f"{val:{fmt}}%" if (i < self.num_classes or j < self.num_classes) else ""
+                else:
+                    text_str = f"{val:{fmt}}"
+                    
+                if text_str:
+                    plt.text(
+                        j, i, text_str,
+                        ha="center", va="center",
+                        color="white" if val > thresh else "black",
+                        fontsize=10, fontweight="bold"
+                    )
 
         plt.tight_layout()
 
