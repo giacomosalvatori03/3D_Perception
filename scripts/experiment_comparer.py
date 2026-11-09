@@ -171,13 +171,12 @@ class ExperimentComparer:
         exp_order: Optional[List[str]] = None,
         target_class: str = "Car",
         difficulty: str = "Moderate",
-        title: str = "Robustness Comparison: LiDAR-Only vs Late Fusion",
+        title: str = "Robustness Comparison",
         save_path: Optional[str] = None,
         exclude_64beams: bool = True,
+        label_base: str = "LiDAR Only (PointPillars)",
+        label_target: str = "LiDAR + Camera (Late Fusion)",
     ):
-        """Plots overlaid mAP40 degradation curves comparing LiDAR-Only against Late Fusion,
-        filtering out 64-beam redundant experiments by default.
-        """
         f_root = fusion_root or self.fusion_root
         if not f_root or not os.path.exists(f_root):
             raise FileNotFoundError(f"Fusion root directory not found: {f_root}")
@@ -185,56 +184,34 @@ class ExperimentComparer:
         df_lidar = self.load_global_results(self.experiments_root)
         df_fusion = self.load_global_results(f_root)
 
+        df_lidar["Clean_Exp"] = df_lidar["Experiment"].str.replace("fusion_", "")
+        df_fusion["Clean_Exp"] = df_fusion["Experiment"].str.replace("fusion_", "")
+
         s_lidar = (
-            df_lidar[
-                (df_lidar["Class"] == target_class)
-                & (df_lidar["Difficulty"] == difficulty)
-            ]
-            .set_index("Experiment")["mAP40"]
+            df_lidar[(df_lidar["Class"] == target_class) & (df_lidar["Difficulty"] == difficulty)]
+            .set_index("Clean_Exp")["mAP40"]
         )
         s_fusion = (
-            df_fusion[
-                (df_fusion["Class"] == target_class)
-                & (df_fusion["Difficulty"] == difficulty)
-            ]
-            .set_index("Experiment")["mAP40"]
+            df_fusion[(df_fusion["Class"] == target_class) & (df_fusion["Difficulty"] == difficulty)]
+            .set_index("Clean_Exp")["mAP40"]
         )
 
         if exp_order is None:
             exp_order = self._sort_experiment_names(list(s_lidar.index))
+        else:
+            exp_order = [e.replace("fusion_", "") for e in exp_order]
 
-        # Automatic exclusion of 64 beams from the experiments
         if exclude_64beams:
             exp_order = [e for e in exp_order if "64" not in e.lower()]
 
         y_lidar = [s_lidar.get(e, None) for e in exp_order]
-        y_fusion = [
-            s_fusion.get(f"fusion_{e}", s_fusion.get(e, None)) for e in exp_order
-        ]
+        y_fusion = [s_fusion.get(e, None) for e in exp_order]
 
         plt.figure(figsize=(10, 5.5))
-        plt.plot(
-            exp_order,
-            y_lidar,
-            marker="o",
-            linewidth=2.5,
-            color="crimson",
-            label="LiDAR Only (PointPillars)",
-        )
-        plt.plot(
-            exp_order,
-            y_fusion,
-            marker="s",
-            linewidth=2.5,
-            color="mediumseagreen",
-            label="LiDAR + Camera (Late Fusion)",
-        )
+        plt.plot(exp_order, y_lidar, marker="o", linewidth=2.5, color="crimson", label=label_base)
+        plt.plot(exp_order, y_fusion, marker="s", linewidth=2.5, color="royalblue", label=label_target)
 
-        plt.title(
-            f"{title} - Class: {target_class} ({difficulty})",
-            fontsize=12,
-            fontweight="bold",
-        )
+        plt.title(f"{title} - Class: {target_class} ({difficulty})", fontsize=12, fontweight="bold")
         plt.xlabel("Experiment / Subsampling Level", fontsize=11)
         plt.ylabel("mAP40 (%)", fontsize=11)
         plt.ylim(-5, 105)
@@ -243,6 +220,9 @@ class ExperimentComparer:
         plt.tight_layout()
 
         if save_path:
+            dir_path = os.path.dirname(save_path)
+            if dir_path:
+                os.makedirs(dir_path, exist_ok=True)
             plt.savefig(save_path, dpi=150, bbox_inches="tight")
             print(f" Overlay plot saved to: {save_path}")
 
