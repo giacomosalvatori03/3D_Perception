@@ -72,15 +72,6 @@ $$x = \left[ S_{3D}, \; S_{2D}, \; \text{IoU}_{2D}, \; \frac{\text{Depth}}{80.0}
 ### 1. Cross-Paradigm Comparison (Moderate $mAP_{40}$): LiDAR-Only vs. Class-Adaptive vs. Learned Fusion
 Comparison across **Single-Modality LiDAR-Only (Project #1)**, **Traditional Class-Adaptive Late Fusion (Project #2)**, and **FastCLOCs Learned Fusion (Project #3)** on the KITTI Validation Set:
 
-| Subsampling Regime | Car (LiDAR) | Car (Adaptive) | Car (FastCLOCs) | Ped. (LiDAR) | Ped. (Adaptive) | Ped. (FastCLOCs) | Cyc. (LiDAR) | Cyc. (Adaptive) | Cyc. (FastCLOCs) |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Baseline (100% / 64 Beams)** | 62.71% | 62.75% | **66.43%** | 50.11% | 50.35% | **63.97%** | 43.70% | 44.02% | **45.00%** |
-| **Random Drop 75%*** | 59.62% | — | **62.76%** | — | — | **63.61%** | — | — | **45.00%** |
-| **Random Drop 50%** | 54.77% | 56.10% | **58.24%** | 46.12% | 46.87% | **66.54%** | 28.15% | 28.70% | **46.67%** |
-| **Random Drop 25%** | 43.81% | 44.48% | **46.42%** | 35.57% | 36.43% | **42.81%** | 20.25% | **20.48%** | 20.00% |
-| **Beam Reduction (32 Rings)** | 56.61% | 56.85% | **60.34%** | 45.10% | 45.59% | **50.53%** | 29.62% | 30.10% | **38.00%** |
-| **Beam Reduction (16 Rings)** | 36.80% | 37.75% | **40.13%** | 26.97% | 28.16% | **29.84%** | 13.45% | **14.33%** | 13.33% |
-
 | Subsampling Regime | Class | LiDAR-Only (E / M / H) | Adaptive Traditional (E / M / H) | Learned Fusion (E / M / H) |
 | :--- | :--- | :---: | :---: | :---: |
 | **`baseline_100perc`** | **Car** | 67.40% / 62.71% / 59.77% | 67.12% / 62.81% / 59.95% | **73.03% / 66.43% / 63.82%** |
